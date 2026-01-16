@@ -1,0 +1,45 @@
+# Suderra Edge Agent Systemd Service
+# IEC 62443 SL2 Compliant Configuration
+#
+# Installation:
+#   sudo cp suderra-agent.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable suderra-agent
+#   sudo systemctl start suderra-agent
+
+[Unit]
+Description=Suderra Edge Agent for Industrial IoT
+Documentation=https://github.com/suderra/edge-agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+ExecStart=/usr/local/bin/suderra-agent
+Restart=on-failure
+RestartSec=5s
+
+# Watchdog: systemd will restart if no heartbeat in 30s
+WatchdogSec=30s
+
+# Resource limits for embedded devices
+MemoryMax=128M
+CPUQuota=50%
+
+# Security hardening (IEC 62443 SL2 FR3)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/suderra-agent /etc/suderra
+
+# Allow necessary capabilities
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=suderra-agent
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,91 @@
+# cargo-deny configuration for Suderra Edge Agent
+# https://embarkstudios.github.io/cargo-deny/
+#
+# IEC 62443 SL2 Compliance: Dependency security and license management
+
+[graph]
+# Targets to check (edge devices are typically x86_64 or ARM Linux)
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "armv7-unknown-linux-gnueabihf",
+]
+
+[advisories]
+# Vulnerability database check
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+
+# Deny known vulnerabilities
+version = 2
+
+# Ignore specific advisories (with justification)
+ignore = [
+    # RUSTSEC-2025-0134: rustls-pemfile marked unmaintained (transitional)
+    # Justification: Used by reqwest, waiting for upstream fix
+    "RUSTSEC-2025-0134",
+]
+
+[licenses]
+# Confidence threshold for license detection
+confidence-threshold = 0.93
+
+# Allowed licenses (OSI-approved, permissive)
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "ISC",
+    "Zlib",
+    "CC0-1.0",
+    "Unicode-DFS-2016",
+    "Unlicense",
+    "MPL-2.0",  # Weak copyleft, file-level
+]
+
+# Crates with non-standard license expressions that need clarification
+[[licenses.clarify]]
+name = "ring"
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
+
+[[licenses.clarify]]
+name = "webpki"
+expression = "ISC"
+license-files = [{ path = "LICENSE", hash = 0x001c7e6c }]
+
+[bans]
+# Warn about multiple versions of the same crate (bloat)
+multiple-versions = "warn"
+
+# Deny wildcard dependencies (reproducibility)
+wildcards = "deny"
+
+# Deny specific problematic crates
+deny = [
+    # OpenSSL has portability issues - use rustls instead
+    { name = "openssl", reason = "Use rustls for cross-platform TLS" },
+    { name = "openssl-sys", reason = "Use rustls for cross-platform TLS" },
+]
+
+# Skip checking for build dependencies (less strict)
+skip = []
+
+# Skip checking tree for these crates
+skip-tree = []
+
+[sources]
+# Deny crates from unknown registries
+unknown-registry = "deny"
+
+# Warn about crates from git (less reproducible)
+unknown-git = "warn"
+
+# Allow crates from crates.io
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
+# No allowed git sources by default
+allow-git = []
