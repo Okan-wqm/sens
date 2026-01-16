@@ -51,7 +51,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       # Don't use --all-features as gpio feature requires Linux-specific rppal
-      - run: cargo test
+      # Use -- --nocapture for verbose test output on failure
+      - run: cargo test -- --nocapture
 
   # IEC 62443 SL2 Security: Vulnerability scanning
   audit:
