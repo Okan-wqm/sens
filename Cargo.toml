@@ -1,0 +1,101 @@
+[package]
+name = "suderra-agent"
+version = "1.0.0"
+edition = "2021"
+authors = ["Suderra <info@suderra.com>"]
+description = "Suderra Edge Agent for Industrial IoT"
+license = "Proprietary"
+repository = "https://github.com/suderra/edge-agent"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+
+# HTTP client for provisioning API
+# Use rustls for cross-compilation support (no OpenSSL dependency)
+reqwest = { version = "0.11", features = ["json", "rustls-tls"], default-features = false }
+
+# MQTT client
+rumqttc = "0.24"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# System info for telemetry
+sysinfo = "0.30"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Regex for script variable interpolation
+regex = "1.10"
+
+# Modbus TCP/RTU for PLC communication
+tokio-modbus = "0.13"
+tokio-serial = "5.4"
+
+# GPIO support (for Raspberry Pi / Revolution Pi)
+# rppal = { version = "0.17", optional = true }
+
+# Signal handling
+ctrlc = "3.4"
+
+# Machine ID / fingerprint
+machine-uid = "0.5"
+
+# MAC address
+mac_address = "1.1"
+
+# Hostname
+hostname = "0.3"
+
+# SQLite for RETAIN variable persistence (IEC 61131-3 compliance)
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# Bounded cache for memory management (prevents unbounded growth)
+moka = { version = "0.12", features = ["sync"] }
+
+# Systemd integration (watchdog, ready notification)
+sd-notify = "0.4"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Linux-specific GPIO support
+rppal = { version = "0.17", optional = true }
+
+[features]
+default = []
+gpio = ["rppal"]
+
+[profile.release]
+opt-level = "z"     # Optimize for size
+lto = true          # Link-time optimization
+codegen-units = 1   # Better optimization
+panic = "abort"     # Smaller binary
+strip = true        # Strip symbols
+
+# IoT-specific Clippy lints for safety and reliability
+# IEC 62443 SL2 FR3: Input validation
+[lints.clippy]
+unwrap_used = "warn"         # Prefer explicit error handling
+expect_used = "warn"         # Document panic conditions
+indexing_slicing = "warn"    # Use .get() for bounds safety
+large_stack_arrays = "warn"  # Prevent stack overflow on embedded
+todo = "warn"                # Track incomplete code
+unimplemented = "warn"       # No unimplemented panics in production
+dbg_macro = "warn"           # No debug macros in release
+print_stdout = "warn"        # Use tracing instead
+print_stderr = "warn"        # Use tracing instead
+
+[[bin]]
+name = "suderra-agent"
+path = "src/main.rs"
