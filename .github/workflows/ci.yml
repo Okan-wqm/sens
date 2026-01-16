@@ -63,3 +63,6 @@ jobs:
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # Ignore unmaintained crate warnings (not security vulnerabilities)
+          # RUSTSEC-2025-0134: rustls-pemfile marked unmaintained
+          ignore: RUSTSEC-2025-0134
