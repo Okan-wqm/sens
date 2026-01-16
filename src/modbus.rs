@@ -21,8 +21,8 @@ use tokio_modbus::client::tcp;
 use tokio_modbus::prelude::*;
 use tracing::{debug, error, info, warn};
 
-use crate::config::{ByteOrder, ModbusDeviceConfig, ModbusRegisterConfig};
-use crate::resilience::{with_timeout, CircuitBreaker};
+use crate::config::{ByteOrder, ModbusDeviceConfig, ModbusRegisterConfig, ModbusSecurityConfig};
+use crate::resilience::{with_timeout, CircuitBreaker, RateLimiter};
 
 /// Default timeout for Modbus operations
 const MODBUS_TIMEOUT: Duration = Duration::from_secs(5);
@@ -32,6 +32,24 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const CIRCUIT_BREAKER_THRESHOLD: u32 = 3;
 /// Circuit breaker recovery timeout
 const CIRCUIT_BREAKER_RECOVERY: Duration = Duration::from_secs(30);
+
+// Modbus Function Codes (IEC 62443 SL2 FR3: Whitelisting)
+/// FC 1: Read Coils
+const FC_READ_COILS: u8 = 1;
+/// FC 2: Read Discrete Inputs
+const FC_READ_DISCRETE_INPUTS: u8 = 2;
+/// FC 3: Read Holding Registers
+const FC_READ_HOLDING_REGISTERS: u8 = 3;
+/// FC 4: Read Input Registers
+const FC_READ_INPUT_REGISTERS: u8 = 4;
+/// FC 5: Write Single Coil
+const FC_WRITE_SINGLE_COIL: u8 = 5;
+/// FC 6: Write Single Register
+const FC_WRITE_SINGLE_REGISTER: u8 = 6;
+/// FC 15: Write Multiple Coils
+const FC_WRITE_MULTIPLE_COILS: u8 = 15;
+/// FC 16: Write Multiple Registers
+const FC_WRITE_MULTIPLE_REGISTERS: u8 = 16;
 
 // ============================================================================
 // Actor Pattern Types
@@ -233,16 +251,24 @@ impl ModbusActor {
 // Core Modbus Types
 // ============================================================================
 
-/// Modbus client wrapper with circuit breaker
+/// Modbus client wrapper with circuit breaker and rate limiter
+///
+/// # Security Features (IEC 62443 SL2)
+/// - FR3: Function code whitelist validation
+/// - FR5: Rate limiting to prevent resource exhaustion
 pub struct ModbusClient {
     /// Device configuration (without registers to avoid large clones)
     config: ModbusDeviceConfig,
     /// Register configurations (Arc to avoid cloning on every read)
     registers: Arc<Vec<ModbusRegisterConfig>>,
+    /// Security configuration
+    security: ModbusSecurityConfig,
     /// Modbus context
     ctx: Option<client::Context>,
     /// Circuit breaker for fault tolerance
     circuit_breaker: CircuitBreaker,
+    /// Rate limiter for DoS prevention
+    rate_limiter: RateLimiter,
 }
 
 /// Register value with metadata
@@ -273,14 +299,91 @@ impl ModbusClient {
             CIRCUIT_BREAKER_RECOVERY,
         );
 
+        // Create rate limiter from security config
+        let rate_limiter = RateLimiter::new(
+            format!("modbus-rate-{}", config.name),
+            config.security.rate_limit_burst,
+            config.security.rate_limit_ops_per_sec,
+        );
+
         // Store registers in Arc to avoid cloning on every read
         let registers = Arc::new(config.registers.clone());
+        let security = config.security.clone();
 
         Self {
             config,
             registers,
+            security,
             ctx: None,
             circuit_breaker,
+            rate_limiter,
+        }
+    }
+
+    /// Validate function code against whitelist
+    ///
+    /// # Security
+    /// IEC 62443 SL2 FR3: Only allow pre-approved function codes
+    fn validate_function_code(&self, function_code: u8) -> Result<()> {
+        if !self.security.enabled {
+            return Ok(());
+        }
+
+        if self.security.allowed_function_codes.contains(&function_code) {
+            Ok(())
+        } else {
+            warn!(
+                "Modbus function code {} denied for device '{}' (whitelist: {:?})",
+                function_code, self.config.name, self.security.allowed_function_codes
+            );
+            Err(anyhow::anyhow!(
+                "Function code {} not allowed by security policy",
+                function_code
+            ))
+        }
+    }
+
+    /// Validate write operation is permitted
+    fn validate_write_allowed(&self) -> Result<()> {
+        if !self.security.enabled {
+            return Ok(());
+        }
+
+        if self.security.allow_writes {
+            Ok(())
+        } else {
+            warn!(
+                "Write operation denied for device '{}' (allow_writes=false)",
+                self.config.name
+            );
+            Err(anyhow::anyhow!(
+                "Write operations not allowed by security policy"
+            ))
+        }
+    }
+
+    /// Try to acquire rate limiter token
+    ///
+    /// # Security
+    /// IEC 62443 SL2 FR5: Prevent resource exhaustion attacks
+    fn acquire_rate_limit(&self) -> Result<()> {
+        if !self.security.enabled {
+            return Ok(());
+        }
+
+        if self.rate_limiter.try_acquire() {
+            Ok(())
+        } else {
+            warn!(
+                "Rate limit exceeded for Modbus device '{}' ({}/{} tokens)",
+                self.config.name,
+                self.rate_limiter.available_tokens(),
+                self.rate_limiter.capacity()
+            );
+            Err(anyhow::anyhow!(
+                "Rate limit exceeded for device '{}'",
+                self.config.name
+            ))
         }
     }
 
@@ -452,12 +555,39 @@ impl ModbusClient {
     }
 
     /// Read a single register
+    ///
+    /// # Security
+    /// - Validates function code against whitelist
+    /// - Enforces rate limiting
+    /// - Validates register count limits
     pub async fn read_register(
         &mut self,
         register: &ModbusRegisterConfig,
     ) -> Result<RegisterValue> {
+        // Security checks
+        self.acquire_rate_limit()?;
+
         // Calculate register count before borrowing ctx to satisfy borrow checker
         let register_count = self.get_register_count(&register.data_type);
+
+        // Validate register count (IEC 62443 SL2 FR3: Input validation)
+        if register_count > self.security.max_register_count {
+            return Err(anyhow::anyhow!(
+                "Register count {} exceeds maximum {} for security policy",
+                register_count,
+                self.security.max_register_count
+            ));
+        }
+
+        // Determine function code and validate
+        let function_code = match register.register_type.as_str() {
+            "holding" => FC_READ_HOLDING_REGISTERS,
+            "input" => FC_READ_INPUT_REGISTERS,
+            "coil" => FC_READ_COILS,
+            "discrete" => FC_READ_DISCRETE_INPUTS,
+            other => return Err(anyhow::anyhow!("Unknown register type: {}", other)),
+        };
+        self.validate_function_code(function_code)?;
 
         let ctx = self
             .ctx
@@ -527,7 +657,17 @@ impl ModbusClient {
     }
 
     /// Write to a holding register
+    ///
+    /// # Security
+    /// - Validates write operations are allowed
+    /// - Validates function code against whitelist
+    /// - Enforces rate limiting
     pub async fn write_register(&mut self, address: u16, value: u16) -> Result<()> {
+        // Security checks
+        self.validate_write_allowed()?;
+        self.validate_function_code(FC_WRITE_SINGLE_REGISTER)?;
+        self.acquire_rate_limit()?;
+
         let ctx = self
             .ctx
             .as_mut()
@@ -543,7 +683,17 @@ impl ModbusClient {
     }
 
     /// Write to a coil
+    ///
+    /// # Security
+    /// - Validates write operations are allowed
+    /// - Validates function code against whitelist
+    /// - Enforces rate limiting
     pub async fn write_coil(&mut self, address: u16, value: bool) -> Result<()> {
+        // Security checks
+        self.validate_write_allowed()?;
+        self.validate_function_code(FC_WRITE_SINGLE_COIL)?;
+        self.acquire_rate_limit()?;
+
         let ctx = self
             .ctx
             .as_mut()
@@ -765,6 +915,7 @@ mod tests {
             slave_id: 1,
             baud_rate: None,
             registers: vec![],
+            security: Default::default(),
         });
 
         // Test u32 BigEndian: 0x0001 0x0000 = 65536 (AB CD)
@@ -782,6 +933,7 @@ mod tests {
             slave_id: 1,
             baud_rate: None,
             registers: vec![],
+            security: Default::default(),
         });
 
         // Test u32 LittleEndian: 0x0001 0x0000 = 1 (CD AB = 0x0000 0x0001)
@@ -799,6 +951,7 @@ mod tests {
             slave_id: 1,
             baud_rate: None,
             registers: vec![],
+            security: Default::default(),
         });
 
         // Test with 0x1234 0x5678

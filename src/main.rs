@@ -10,12 +10,16 @@
 //! - Graceful shutdown coordinator
 //! - Granular state management
 
+mod bounded;
 mod commands;
 mod config;
 mod error;
 mod gpio;
+mod health;
+mod interning;
 mod modbus;
 mod mqtt;
+mod offline_queue;
 mod provisioning;
 mod resilience;
 mod scripting;
@@ -186,6 +190,10 @@ async fn async_main() -> Result<()> {
         }
     };
 
+    // Initialize OpenTelemetry OTLP export (if configured and feature enabled)
+    // This adds distributed tracing support for production observability
+    let _otel_provider = init_opentelemetry(&config);
+
     // Create shared state
     let state = Arc::new(RwLock::new(AppState::new(config.clone())));
 
@@ -220,6 +228,9 @@ async fn async_main() -> Result<()> {
 }
 
 /// Initialize logging with tracing
+///
+/// Note: OpenTelemetry OTLP export is initialized separately in `init_opentelemetry()`
+/// after configuration is loaded.
 fn init_logging() {
     use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
@@ -229,6 +240,75 @@ fn init_logging() {
         .with(fmt::layer().with_target(true))
         .with(filter)
         .init();
+}
+
+/// Initialize OpenTelemetry OTLP exporter (if configured)
+///
+/// This must be called after configuration is loaded. When the `telemetry` feature
+/// is enabled and an OTLP endpoint is configured, traces will be exported to the
+/// specified collector (e.g., Jaeger, Tempo, OpenTelemetry Collector).
+///
+/// # IEC 62443 SL2 FR6: Continuous Monitoring
+/// OpenTelemetry provides distributed tracing for observability and debugging.
+#[cfg(feature = "telemetry")]
+fn init_opentelemetry(config: &config::AgentConfig) -> Option<opentelemetry_sdk::trace::TracerProvider> {
+    use opentelemetry::trace::TracerProvider;
+    use opentelemetry_otlp::WithExportConfig;
+    use opentelemetry_sdk::trace::Sampler;
+
+    let endpoint = config.telemetry.otlp.endpoint.as_ref()?;
+
+    info!("Initializing OpenTelemetry OTLP export to {}", endpoint);
+
+    let exporter = opentelemetry_otlp::new_exporter()
+        .tonic()
+        .with_endpoint(endpoint);
+
+    match opentelemetry_otlp::new_pipeline()
+        .tracing()
+        .with_exporter(exporter)
+        .with_trace_config(
+            opentelemetry_sdk::trace::Config::default()
+                .with_sampler(Sampler::TraceIdRatioBased(
+                    config.telemetry.otlp.sample_ratio
+                ))
+                .with_resource(opentelemetry_sdk::Resource::new(vec![
+                    opentelemetry::KeyValue::new(
+                        "service.name",
+                        config.telemetry.otlp.service_name.clone()
+                    ),
+                    opentelemetry::KeyValue::new(
+                        "service.version",
+                        env!("CARGO_PKG_VERSION")
+                    ),
+                    opentelemetry::KeyValue::new(
+                        "device.id",
+                        config.device_id.clone()
+                    ),
+                ]))
+        )
+        .install_batch(opentelemetry_sdk::runtime::Tokio)
+    {
+        Ok(provider) => {
+            info!(
+                "OpenTelemetry OTLP enabled: endpoint={}, service={}, sample_ratio={}",
+                endpoint,
+                config.telemetry.otlp.service_name,
+                config.telemetry.otlp.sample_ratio
+            );
+            Some(provider)
+        }
+        Err(e) => {
+            warn!("Failed to initialize OpenTelemetry: {}", e);
+            None
+        }
+    }
+}
+
+/// Stub for when telemetry feature is disabled
+#[cfg(not(feature = "telemetry"))]
+fn init_opentelemetry(_config: &config::AgentConfig) -> Option<()> {
+    None
 }
 
 /// Notify systemd that the service is ready (IEC 62443 SL2 FR6)

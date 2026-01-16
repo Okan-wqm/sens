@@ -66,3 +66,15 @@ jobs:
           # Ignore unmaintained crate warnings (not security vulnerabilities)
           # RUSTSEC-2025-0134: rustls-pemfile marked unmaintained
           ignore: RUSTSEC-2025-0134
+
+  # IEC 62443 SL2 Security: License and dependency policy enforcement
+  deny:
+    name: Cargo Deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          # Check all targets defined in deny.toml
+          command: check
+          arguments: --all-features

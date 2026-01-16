@@ -191,6 +191,22 @@ pub struct ResolvedTopics {
     pub config: String,
 }
 
+/// OpenTelemetry OTLP configuration (optional, requires "telemetry" feature)
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OtlpConfig {
+    /// OTLP endpoint URL (e.g., "http://localhost:4317")
+    /// If not set, OpenTelemetry export is disabled
+    pub endpoint: Option<String>,
+
+    /// Service name for traces
+    #[serde(default = "default_service_name")]
+    pub service_name: String,
+
+    /// Sample ratio (0.0 to 1.0, default 1.0 = sample all)
+    #[serde(default = "default_sample_ratio")]
+    pub sample_ratio: f64,
+}
+
 /// Telemetry configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TelemetryConfig {
@@ -225,6 +241,10 @@ pub struct TelemetryConfig {
     /// Include GPIO pin states
     #[serde(default = "default_true")]
     pub include_gpio: bool,
+
+    /// OpenTelemetry OTLP export configuration (optional)
+    #[serde(default)]
+    pub otlp: OtlpConfig,
 }
 
 impl Default for TelemetryConfig {
@@ -238,6 +258,7 @@ impl Default for TelemetryConfig {
             include_system: true,
             include_modbus: true,
             include_gpio: true,
+            otlp: OtlpConfig::default(),
         }
     }
 }
@@ -375,6 +396,48 @@ impl Default for LoggingConfig {
     }
 }
 
+/// Modbus security configuration (IEC 62443 SL2 FR3/FR5)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModbusSecurityConfig {
+    /// Enable security checks
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    /// Allowed Modbus function codes (whitelist)
+    /// Default: [1, 2, 3, 4] (read coils, discrete inputs, holding/input registers)
+    #[serde(default = "default_modbus_function_whitelist")]
+    pub allowed_function_codes: Vec<u8>,
+
+    /// Rate limit: maximum operations per second
+    #[serde(default = "default_modbus_rate_limit")]
+    pub rate_limit_ops_per_sec: u64,
+
+    /// Rate limit: burst capacity (max concurrent ops)
+    #[serde(default = "default_modbus_burst_capacity")]
+    pub rate_limit_burst: u64,
+
+    /// Maximum register count per read operation
+    #[serde(default = "default_max_register_count")]
+    pub max_register_count: u16,
+
+    /// Allow write operations (coils and registers)
+    #[serde(default)]
+    pub allow_writes: bool,
+}
+
+impl Default for ModbusSecurityConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            allowed_function_codes: default_modbus_function_whitelist(),
+            rate_limit_ops_per_sec: default_modbus_rate_limit(),
+            rate_limit_burst: default_modbus_burst_capacity(),
+            max_register_count: default_max_register_count(),
+            allow_writes: false,
+        }
+    }
+}
+
 /// Modbus device configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModbusDeviceConfig {
@@ -397,6 +460,10 @@ pub struct ModbusDeviceConfig {
     /// Registers to poll
     #[serde(default)]
     pub registers: Vec<ModbusRegisterConfig>,
+
+    /// Security configuration (optional, uses global defaults if not specified)
+    #[serde(default)]
+    pub security: ModbusSecurityConfig,
 }
 
 /// Byte order for multi-register values
@@ -488,6 +555,15 @@ fn default_true() -> bool {
 fn default_telemetry_interval() -> u64 {
     30
 }
+
+// OpenTelemetry OTLP defaults
+fn default_service_name() -> String {
+    "suderra-agent".to_string()
+}
+fn default_sample_ratio() -> f64 {
+    1.0 // Sample all traces by default
+}
+
 fn default_log_level() -> String {
     "info".to_string()
 }
@@ -505,6 +581,25 @@ fn default_scale() -> f64 {
 }
 fn default_pull() -> String {
     "none".to_string()
+}
+
+// Modbus security defaults (IEC 62443 SL2)
+fn default_modbus_function_whitelist() -> Vec<u8> {
+    // Only allow read operations by default:
+    // FC 1: Read Coils
+    // FC 2: Read Discrete Inputs
+    // FC 3: Read Holding Registers
+    // FC 4: Read Input Registers
+    vec![1, 2, 3, 4]
+}
+fn default_modbus_rate_limit() -> u64 {
+    10 // 10 operations per second (conservative default)
+}
+fn default_modbus_burst_capacity() -> u64 {
+    20 // Allow burst of 20 operations
+}
+fn default_max_register_count() -> u16 {
+    125 // Modbus protocol max is 125 for holding/input registers
 }
 
 // Scripting defaults

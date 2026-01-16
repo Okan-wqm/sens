@@ -7,6 +7,10 @@ description = "Suderra Edge Agent for Industrial IoT"
 license = "Proprietary"
 repository = "https://github.com/suderra/edge-agent"
 
+# Exclude fuzz directory from workspace (cargo-fuzz manages its own)
+[workspace]
+exclude = ["fuzz"]
+
 [dependencies]
 # Async runtime
 tokio = { version = "1.35", features = ["full"] }
@@ -68,6 +72,25 @@ moka = { version = "0.12", features = ["sync"] }
 # Systemd integration (watchdog, ready notification)
 sd-notify = "0.4"
 
+# String interning for memory efficiency (device IDs, topic names)
+lasso = { version = "0.7", features = ["multi-threaded"] }
+
+# Bounded stack-allocated collections (IEC 62443 FR3: memory safety)
+heapless = "0.8"
+
+# HTTP server for health check endpoint
+axum = { version = "0.7", optional = true }
+
+# OpenTelemetry for distributed tracing (optional)
+opentelemetry = { version = "0.22", optional = true }
+opentelemetry-otlp = { version = "0.15", features = ["trace"], optional = true }
+opentelemetry_sdk = { version = "0.22", features = ["rt-tokio"], optional = true }
+tracing-opentelemetry = { version = "0.23", optional = true }
+
+# Prometheus metrics (optional)
+metrics = { version = "0.22", optional = true }
+metrics-exporter-prometheus = { version = "0.14", optional = true }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 # Linux-specific GPIO support
 rppal = { version = "0.17", optional = true }
@@ -75,6 +98,12 @@ rppal = { version = "0.17", optional = true }
 [features]
 default = []
 gpio = ["rppal"]
+# HTTP health check endpoint (uses axum)
+health = ["axum"]
+# OpenTelemetry distributed tracing
+telemetry = ["opentelemetry", "opentelemetry-otlp", "opentelemetry_sdk", "tracing-opentelemetry"]
+# Prometheus metrics export
+metrics = ["dep:metrics", "metrics-exporter-prometheus"]
 
 [profile.release]
 opt-level = "z"     # Optimize for size
