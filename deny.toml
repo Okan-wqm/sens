@@ -46,16 +46,11 @@ allow = [
     "MPL-2.0",  # Weak copyleft, file-level
 ]
 
-# Crates with non-standard license expressions that need clarification
-[[licenses.clarify]]
-name = "ring"
-expression = "MIT AND ISC AND OpenSSL"
-license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
-
-[[licenses.clarify]]
-name = "webpki"
-expression = "ISC"
-license-files = [{ path = "LICENSE", hash = 0x001c7e6c }]
+# Exceptions for crates with complex license situations
+exceptions = [
+    # ring uses a custom license combining ISC, MIT, and OpenSSL
+    { allow = ["ISC", "MIT", "OpenSSL"], crate = "ring" },
+]
 
 [bans]
 # Warn about multiple versions of the same crate (bloat)
