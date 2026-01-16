@@ -282,7 +282,10 @@ impl OfflineQueue {
         let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("{}", e))?;
 
         let deleted = conn
-            .execute("DELETE FROM message_queue WHERE id = ?1", params![message_id])
+            .execute(
+                "DELETE FROM message_queue WHERE id = ?1",
+                params![message_id],
+            )
             .context("Failed to ack message")?;
 
         if deleted > 0 {
@@ -350,7 +353,8 @@ impl OfflineQueue {
         let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("{}", e))?;
 
         // Build parameterized query
-        let placeholders: Vec<String> = (1..=message_ids.len()).map(|i| format!("?{}", i)).collect();
+        let placeholders: Vec<String> =
+            (1..=message_ids.len()).map(|i| format!("?{}", i)).collect();
         let sql = format!(
             "DELETE FROM message_queue WHERE id IN ({})",
             placeholders.join(", ")
@@ -401,9 +405,8 @@ impl OfflineQueue {
 
         // Count by priority
         let mut by_priority = [0usize; 4];
-        let mut stmt = conn.prepare(
-            "SELECT priority, COUNT(*) FROM message_queue GROUP BY priority",
-        )?;
+        let mut stmt =
+            conn.prepare("SELECT priority, COUNT(*) FROM message_queue GROUP BY priority")?;
         let rows = stmt.query_map([], |row| {
             Ok((row.get::<_, u8>(0)?, row.get::<_, usize>(1)?))
         })?;
@@ -416,11 +419,9 @@ impl OfflineQueue {
 
         // Oldest message age
         let oldest_message_age_secs = conn
-            .query_row(
-                "SELECT MIN(created_at) FROM message_queue",
-                [],
-                |row| row.get::<_, Option<i64>>(0),
-            )
+            .query_row("SELECT MIN(created_at) FROM message_queue", [], |row| {
+                row.get::<_, Option<i64>>(0)
+            })
             .ok()
             .flatten()
             .map(|oldest| {
@@ -586,7 +587,13 @@ mod tests {
         // Enqueue multiple
         for i in 0..5 {
             queue
-                .enqueue(&format!("topic{}", i), &format!("{}", i), MessagePriority::Normal, 1, false)
+                .enqueue(
+                    &format!("topic{}", i),
+                    &format!("{}", i),
+                    MessagePriority::Normal,
+                    1,
+                    false,
+                )
                 .unwrap();
         }
 
@@ -647,7 +654,13 @@ mod tests {
 
         for i in 0..10 {
             queue
-                .enqueue(&format!("topic{}", i), "payload", MessagePriority::Normal, 1, false)
+                .enqueue(
+                    &format!("topic{}", i),
+                    "payload",
+                    MessagePriority::Normal,
+                    1,
+                    false,
+                )
                 .unwrap();
         }
 

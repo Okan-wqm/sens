@@ -55,10 +55,7 @@ impl<T, const N: usize> BoundedExt<T> for HVec<T, N> {
         if self.push(item).is_ok() {
             true
         } else {
-            tracing::warn!(
-                "Bounded collection full (capacity: {}), item dropped",
-                N
-            );
+            tracing::warn!("Bounded collection full (capacity: {}), item dropped", N);
             false
         }
     }

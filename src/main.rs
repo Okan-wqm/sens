@@ -251,7 +251,9 @@ fn init_logging() {
 /// # IEC 62443 SL2 FR6: Continuous Monitoring
 /// OpenTelemetry provides distributed tracing for observability and debugging.
 #[cfg(feature = "telemetry")]
-fn init_opentelemetry(config: &config::AgentConfig) -> Option<opentelemetry_sdk::trace::TracerProvider> {
+fn init_opentelemetry(
+    config: &config::AgentConfig,
+) -> Option<opentelemetry_sdk::trace::TracerProvider> {
     use opentelemetry::trace::TracerProvider;
     use opentelemetry_otlp::WithExportConfig;
     use opentelemetry_sdk::trace::Sampler;
@@ -270,31 +272,23 @@ fn init_opentelemetry(config: &config::AgentConfig) -> Option<opentelemetry_sdk:
         .with_trace_config(
             opentelemetry_sdk::trace::Config::default()
                 .with_sampler(Sampler::TraceIdRatioBased(
-                    config.telemetry.otlp.sample_ratio
+                    config.telemetry.otlp.sample_ratio,
                 ))
                 .with_resource(opentelemetry_sdk::Resource::new(vec![
                     opentelemetry::KeyValue::new(
                         "service.name",
-                        config.telemetry.otlp.service_name.clone()
+                        config.telemetry.otlp.service_name.clone(),
                     ),
-                    opentelemetry::KeyValue::new(
-                        "service.version",
-                        env!("CARGO_PKG_VERSION")
-                    ),
-                    opentelemetry::KeyValue::new(
-                        "device.id",
-                        config.device_id.clone()
-                    ),
-                ]))
+                    opentelemetry::KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
+                    opentelemetry::KeyValue::new("device.id", config.device_id.clone()),
+                ])),
         )
         .install_batch(opentelemetry_sdk::runtime::Tokio)
     {
         Ok(provider) => {
             info!(
                 "OpenTelemetry OTLP enabled: endpoint={}, service={}, sample_ratio={}",
-                endpoint,
-                config.telemetry.otlp.service_name,
-                config.telemetry.otlp.sample_ratio
+                endpoint, config.telemetry.otlp.service_name, config.telemetry.otlp.sample_ratio
             );
             Some(provider)
         }

@@ -329,7 +329,11 @@ impl ModbusClient {
             return Ok(());
         }
 
-        if self.security.allowed_function_codes.contains(&function_code) {
+        if self
+            .security
+            .allowed_function_codes
+            .contains(&function_code)
+        {
             Ok(())
         } else {
             warn!(

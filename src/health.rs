@@ -126,7 +126,9 @@ impl HealthState {
 
     /// Set MQTT connected status
     pub fn set_mqtt_connected(&self, connected: bool) {
-        self.inner.mqtt_connected.store(connected, Ordering::Release);
+        self.inner
+            .mqtt_connected
+            .store(connected, Ordering::Release);
     }
 
     /// Set device activated status
@@ -158,9 +160,7 @@ impl HealthState {
 
     /// Set offline queue size
     pub fn set_offline_queue_size(&self, size: u64) {
-        self.inner
-            .offline_queue_size
-            .store(size, Ordering::Release);
+        self.inner.offline_queue_size.store(size, Ordering::Release);
     }
 
     /// Check if ready (all components initialized)
@@ -234,11 +234,7 @@ pub async fn start_health_server(
     state: HealthState,
 ) -> tokio::task::JoinHandle<()> {
     use axum::{
-        extract::State,
-        http::StatusCode,
-        response::IntoResponse,
-        routing::get,
-        Json, Router,
+        extract::State, http::StatusCode, response::IntoResponse, routing::get, Json, Router,
     };
 
     // Build the router
