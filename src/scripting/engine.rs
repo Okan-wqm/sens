@@ -1653,12 +1653,15 @@ mod tests {
     fn test_scan_cycle_stats_average() {
         let mut stats = ScanCycleStats::default();
 
-        // Run 10 cycles at 50ms
-        for _ in 0..10 {
+        // Run 50 cycles at 50ms
+        // With EMA alpha=0.1, we need ~23 cycles to reach 45 (90% of target)
+        // Using 50 cycles ensures convergence to within tolerance
+        for _ in 0..50 {
             stats.update(Duration::from_millis(50), 100);
         }
 
         // Average should be around 50ms (exponential moving average)
+        // After 50 cycles with alpha=0.1: 50 * (1 - 0.9^50) ≈ 49.7
         assert!(stats.avg_cycle_ms > 45.0 && stats.avg_cycle_ms < 55.0);
     }
 
