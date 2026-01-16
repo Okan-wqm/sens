@@ -41,6 +41,7 @@ allow = [
     "ISC",
     "Zlib",
     "CC0-1.0",
+    "Unicode-3.0",      # ICU/Unicode crates (OSI-approved)
     "Unicode-DFS-2016",
     "Unlicense",
     "MPL-2.0",  # Weak copyleft, file-level
