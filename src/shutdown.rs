@@ -11,7 +11,7 @@
 use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 /// Graceful shutdown coordinator
 pub struct ShutdownCoordinator {

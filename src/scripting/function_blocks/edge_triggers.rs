@@ -26,6 +26,8 @@ use serde_json::{json, Value};
 ///         ↑           ↑
 ///     Rising edges detected
 /// ```
+// IEC 61131-3 standard function block name
+#[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct R_TRIG {
     /// Clock input
@@ -149,6 +151,8 @@ impl FunctionBlock for R_TRIG {
 ///               ↑          ↑
 ///         Falling edges detected
 /// ```
+// IEC 61131-3 standard function block name
+#[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct F_TRIG {
     /// Clock input

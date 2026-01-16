@@ -4,7 +4,9 @@
 //! Uses actor pattern to isolate non-Send rppal types.
 //! Components communicate with the actor via channels.
 
-use anyhow::{Context, Result};
+#[cfg(feature = "gpio")]
+use anyhow::Context;
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;

@@ -300,13 +300,13 @@ impl ModbusClient {
         self.circuit_breaker.reset();
 
         let result = match self.config.connection_type.as_str() {
-            "tcp" => with_timeout(
-                self.connect_tcp_inner(),
-                CONNECT_TIMEOUT,
-                &format!("Modbus TCP connect {}", self.config.name),
-            )
-            .await
-            .map_err(|e| anyhow::anyhow!("{}", e))?,
+            "tcp" => {
+                // Clone name first to avoid borrow conflict with self.connect_tcp_inner()
+                let timeout_msg = format!("Modbus TCP connect {}", self.config.name);
+                with_timeout(self.connect_tcp_inner(), CONNECT_TIMEOUT, &timeout_msg)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{}", e))?
+            }
             "rtu" => self.connect_rtu().await,
             other => Err(anyhow::anyhow!("Unknown connection type: {}", other)),
         };

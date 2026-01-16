@@ -1388,7 +1388,7 @@ impl ScriptEngine {
 
         // Publish to MQTT alert topic
         let app_state = self.state.read().await;
-        if let Some(ref mqtt) = app_state.mqtt_client {
+        if let Some(ref _mqtt) = app_state.mqtt_client {
             let alert_data = json!({
                 "level": format!("{:?}", level).to_lowercase(),
                 "message": message,

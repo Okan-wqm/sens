@@ -8,7 +8,7 @@
 //! - Lower priority scripts are blocked from overwriting
 
 use std::collections::HashMap;
-use tracing::{debug, warn};
+use tracing::warn;
 
 /// Pending write operation for conflict detection
 #[derive(Debug, Clone)]

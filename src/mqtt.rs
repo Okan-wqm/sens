@@ -450,15 +450,18 @@ impl MqttClient {
         };
 
         // Build TLS configuration
-        let tls = if ca_cert.is_empty() {
-            // Use native root certificates
-            TlsConfiguration::Native
-        } else {
-            TlsConfiguration::Simple {
-                ca: ca_cert,
-                alpn: Some(vec![b"mqtt".to_vec()]),
-                client_auth,
-            }
+        // Note: rumqttc requires explicit CA certificate for TLS validation
+        // If no CA cert is provided, return error (security requirement)
+        if ca_cert.is_empty() {
+            return Err(anyhow::anyhow!(
+                "TLS enabled but no CA certificate provided. Set mqtt.tls.ca_cert_path in config."
+            ));
+        }
+
+        let tls = TlsConfiguration::Simple {
+            ca: ca_cert,
+            alpn: Some(vec![b"mqtt".to_vec()]),
+            client_auth,
         };
 
         Ok(Transport::Tls(tls))

@@ -142,16 +142,21 @@ impl AppState {
 fn main() {
     // Build optimized runtime for edge devices
     let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)              // Edge devices typically have 2 cores
-        .max_blocking_threads(8)        // Limit for SQLite blocking ops
-        .thread_stack_size(128 * 1024)  // 128 KB per thread (embedded friendly)
+        .worker_threads(2) // Edge devices typically have 2 cores
+        .max_blocking_threads(8) // Limit for SQLite blocking ops
+        .thread_stack_size(128 * 1024) // 128 KB per thread (embedded friendly)
         .enable_all()
         .build()
         .expect("Failed to build Tokio runtime");
 
     // Run async main within the custom runtime
     if let Err(e) = runtime.block_on(async_main()) {
-        eprintln!("Fatal error: {}", e);
+        // Use tracing for error output (tracing is initialized in async_main, but on fatal
+        // errors we need to output before that, so we allow stderr here)
+        #[allow(clippy::print_stderr)]
+        {
+            eprintln!("Fatal error: {}", e);
+        }
         std::process::exit(1);
     }
 }
@@ -242,12 +247,15 @@ fn notify_systemd_ready() -> Result<()> {
     info!("Notified systemd: service ready");
 
     // Check if watchdog is enabled and start heartbeat task
-    if let Some(watchdog_usec) = sd_notify::watchdog_enabled(false) {
-        let interval = watchdog_usec / 2; // Ping at half the timeout
+    let mut watchdog_usec: u64 = 0;
+    if sd_notify::watchdog_enabled(false, &mut watchdog_usec) && watchdog_usec > 0 {
+        // Ping at half the timeout interval
+        let interval_usec = watchdog_usec / 2;
+        let interval = Duration::from_micros(interval_usec);
         info!(
             "Systemd watchdog enabled (timeout: {}ms, heartbeat: {}ms)",
-            watchdog_usec.as_millis(),
-            interval.as_millis()
+            watchdog_usec / 1000,
+            interval_usec / 1000
         );
 
         // Spawn watchdog heartbeat task

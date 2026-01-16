@@ -9,4 +9,5 @@ mod circuit_breaker;
 mod timeout;
 
 pub use circuit_breaker::CircuitBreaker;
-pub use timeout::{with_timeout, TimeoutError};
+pub use timeout::with_timeout;
+// TimeoutError is available in timeout module if needed

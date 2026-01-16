@@ -115,60 +115,52 @@ impl CircuitBreaker {
 
     /// Record a successful operation
     pub fn record_success(&self) {
-        loop {
-            let current_state = self.state.load(Ordering::Acquire);
+        let current_state = self.state.load(Ordering::Acquire);
 
-            match current_state {
-                STATE_HALF_OPEN => {
-                    let count = self.success_count.fetch_add(1, Ordering::AcqRel) + 1;
-                    if count >= self.success_threshold {
-                        // Try to transition to closed using CAS
-                        if self
-                            .state
-                            .compare_exchange(
-                                STATE_HALF_OPEN,
-                                STATE_CLOSED,
-                                Ordering::AcqRel,
-                                Ordering::Acquire,
-                            )
-                            .is_ok()
-                        {
-                            self.failure_count.store(0, Ordering::Release);
-                            tracing::info!("Circuit breaker '{}' closed after recovery", self.name);
-                        }
+        match current_state {
+            STATE_HALF_OPEN => {
+                let count = self.success_count.fetch_add(1, Ordering::AcqRel) + 1;
+                if count >= self.success_threshold {
+                    // Try to transition to closed using CAS
+                    if self
+                        .state
+                        .compare_exchange(
+                            STATE_HALF_OPEN,
+                            STATE_CLOSED,
+                            Ordering::AcqRel,
+                            Ordering::Acquire,
+                        )
+                        .is_ok()
+                    {
+                        self.failure_count.store(0, Ordering::Release);
+                        tracing::info!("Circuit breaker '{}' closed after recovery", self.name);
                     }
-                    return;
                 }
-                STATE_CLOSED => {
-                    // Reset failure count on success
-                    self.failure_count.store(0, Ordering::Release);
-                    return;
-                }
-                _ => return,
             }
+            STATE_CLOSED => {
+                // Reset failure count on success
+                self.failure_count.store(0, Ordering::Release);
+            }
+            _ => {}
         }
     }
 
     /// Record a failed operation
     pub fn record_failure(&self) {
-        loop {
-            let current_state = self.state.load(Ordering::Acquire);
+        let current_state = self.state.load(Ordering::Acquire);
 
-            match current_state {
-                STATE_CLOSED => {
-                    let count = self.failure_count.fetch_add(1, Ordering::AcqRel) + 1;
-                    if count >= self.failure_threshold {
-                        self.open_circuit();
-                    }
-                    return;
-                }
-                STATE_HALF_OPEN => {
-                    // Immediately open on failure in half-open state
+        match current_state {
+            STATE_CLOSED => {
+                let count = self.failure_count.fetch_add(1, Ordering::AcqRel) + 1;
+                if count >= self.failure_threshold {
                     self.open_circuit();
-                    return;
                 }
-                _ => return,
             }
+            STATE_HALF_OPEN => {
+                // Immediately open on failure in half-open state
+                self.open_circuit();
+            }
+            _ => {}
         }
     }
 

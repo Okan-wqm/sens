@@ -10,8 +10,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use tracing::{debug, error, info, warn};
+use serde_json::Value;
+use tracing::{debug, info, warn};
 
 use super::function_blocks::{FunctionBlock, CTD, CTU, CTUD, F_TRIG, R_TRIG, TOF, TON, TP};
 use super::persistence::{FBState, FunctionBlockStore, SqlitePersistence};
@@ -93,17 +93,13 @@ impl FBRegistry {
             return Err(FBRegistryError::AlreadyExists(def.id.clone()));
         }
 
-        let fb = self.instantiate_fb(&def)?;
+        let mut fb = self.instantiate_fb(&def)?;
 
         // Try to restore state from persistence
         if let Some(ref persistence) = self.persistence {
             if let Ok(Some(state)) = persistence.load_fb_state(&def.id) {
-                let mut fb = fb;
                 if fb.deserialize_state(&state.state_data) {
                     debug!(fb_id = %def.id, "Restored FB state from persistence");
-                    self.instances.insert(def.id.clone(), fb);
-                    self.definitions.insert(def.id.clone(), def);
-                    return Ok(());
                 }
             }
         }

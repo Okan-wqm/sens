@@ -19,7 +19,7 @@ use serde_json::Value;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 // ============================================================================
 // Error Types
