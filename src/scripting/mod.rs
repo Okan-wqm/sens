@@ -28,7 +28,7 @@ pub use actions::{Action, ActionResult, ActionType, AlertLevel};
 pub use conflict::{ConflictDetector, ConflictResult};
 pub use context::ScriptContext;
 pub use engine::ScriptEngine;
-pub use fb_registry::{FBDefinition, FBRegistry, FBRegistryError};
+pub use fb_registry::{FBDefinition, FBParams, FBRegistry, FBRegistryError};
 pub use limits::{ExecutionContext, LimitError, ScriptLimits, ScriptRateLimiter};
 pub use persistence::{PersistenceError, SqlitePersistence, VariableScope, VariableStore};
 pub use storage::{Script, ScriptStatus, ScriptStorage};

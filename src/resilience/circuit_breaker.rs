@@ -237,14 +237,15 @@ mod tests {
 
     #[test]
     fn test_half_open_closes_after_successes() {
-        let cb = CircuitBreaker::new("test", 1, Duration::from_millis(1));
+        // Use longer timeout to avoid timing issues in tests
+        let cb = CircuitBreaker::new("test", 1, Duration::from_millis(100));
 
         // Open the circuit
         cb.record_failure();
         assert!(cb.is_open());
 
         // Wait for recovery timeout
-        std::thread::sleep(Duration::from_millis(5));
+        std::thread::sleep(Duration::from_millis(150));
 
         // Should be half-open now
         assert!(!cb.is_open());
