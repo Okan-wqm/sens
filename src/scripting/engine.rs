@@ -23,7 +23,7 @@ use super::{
     Action, ActionResult, ActionType, AlertLevel, ComparisonOperator, Condition, ConditionType,
     ConflictDetector, ConflictResult, ExecutionContext, ExecutionMode, FBDefinition, FBRegistry,
     LimitError, Script, ScriptContext, ScriptDefinition, ScriptLimits, ScriptRateLimiter,
-    ScriptStatus, ScriptStorage, SqlitePersistence, TriggerManager, VariableScope, VariableStore,
+    ScriptStorage, SqlitePersistence, TriggerManager, VariableScope, VariableStore,
 };
 
 use std::fs;
@@ -1044,10 +1044,8 @@ impl ScriptEngine {
             format!("{} actions failed", actions_failed)
         };
 
-        self.storage
-            .write()
-            .await
-            .update_result(script_id, success, &result_msg);
+        // Update script result (ScriptStorage has internal RwLock)
+        self.storage.update_result(script_id, success, &result_msg).await;
 
         // v2.2: Restore previous script context after execution completes
         // This ensures parent script's context is restored after nested calls

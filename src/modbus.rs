@@ -38,7 +38,7 @@ use std::time::Duration;
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tracing::{debug, error, info, warn};
 
-use crate::config::{ByteOrder, ModbusDeviceConfig, ModbusRegisterConfig, ModbusSecurityConfig, ModbusTlsConfig};
+use crate::config::{ByteOrder, ModbusDeviceConfig, ModbusRegisterConfig, ModbusSecurityConfig};
 use crate::resilience::{with_timeout, CircuitBreaker, RateLimiter};
 
 /// Default timeout for Modbus operations
@@ -492,12 +492,10 @@ impl ModbusClient {
         // Create HostAddr from socket address
         let host_addr = rodbus::client::HostAddr::ip(socket_addr.ip(), socket_addr.port());
 
-        // Retry strategy for connection resilience
-        let retry: Box<dyn rodbus::RetryStrategy> = Box::new(
-            rodbus::ExponentialBackoffRetry::new(
-                Duration::from_secs(2),  // Min retry delay
-                Duration::from_secs(30), // Max retry delay
-            )
+        // Retry strategy for connection resilience (doubling backoff)
+        let retry = rodbus::doubling_retry_strategy(
+            Duration::from_secs(2),  // Min retry delay
+            Duration::from_secs(30), // Max retry delay
         );
 
         let channel = if self.config.tls.enabled {
@@ -527,7 +525,7 @@ impl ModbusClient {
                 let client_key_path = std::path::Path::new(key_path);
 
                 rodbus::client::TlsClientConfig::full_pki(
-                    Some(&server_name),           // Server name for SNI validation
+                    Some(server_name.clone()),    // Server name for SNI validation (Option<String>)
                     ca_path,                       // CA certificate path
                     client_cert_path,              // Client certificate path
                     client_key_path,               // Client private key path
@@ -540,7 +538,7 @@ impl ModbusClient {
                 // Note: full_pki without client cert requires empty paths which isn't ideal
                 // For server-only auth, we use self_signed with the CA cert as the expected cert
                 rodbus::client::TlsClientConfig::full_pki(
-                    Some(&server_name),           // Server name for SNI validation
+                    Some(server_name.clone()),    // Server name for SNI validation (Option<String>)
                     ca_path,                       // CA certificate path
                     std::path::Path::new(""),      // Empty client cert path
                     std::path::Path::new(""),      // Empty client key path
@@ -602,18 +600,16 @@ impl ModbusClient {
                 self.config.name, self.config.address, baud_rate
             );
 
-            // Retry strategy for connection resilience
-            let retry: Box<dyn rodbus::RetryStrategy> = Box::new(
-                rodbus::ExponentialBackoffRetry::new(
-                    Duration::from_secs(2),  // Min retry delay
-                    Duration::from_secs(30), // Max retry delay
-                )
+            // Retry strategy for connection resilience (doubling backoff)
+            let retry = rodbus::doubling_retry_strategy(
+                Duration::from_secs(2),  // Min retry delay
+                Duration::from_secs(30), // Max retry delay
             );
 
             // Create serial port settings using rodbus 1.4 API
             let path = &self.config.address;
             let serial_settings = rodbus::SerialSettings {
-                baud_rate: rodbus::Baud::rate(baud_rate),
+                baud_rate,                       // u32 directly
                 data_bits: rodbus::DataBits::Eight,
                 stop_bits: rodbus::StopBits::One,
                 parity: rodbus::Parity::None,
@@ -774,20 +770,23 @@ impl ModbusClient {
         let addr_range = AddressRange::try_from(register.address, register_count)
             .map_err(|e| anyhow::anyhow!("Invalid address range: {:?}", e))?;
 
-        let raw_values = match register.register_type.as_str() {
+        // rodbus returns Vec<Indexed<T>>, we extract the .value from each
+        let raw_values: Vec<u16> = match register.register_type.as_str() {
             "holding" => {
                 let result = channel
                     .read_holding_registers(params, addr_range)
                     .await
                     .map_err(|e| anyhow::anyhow!("Failed to read holding registers: {:?}", e))?;
-                result.into_iter().collect::<Vec<_>>()
+                // Extract .value from each Indexed<u16>
+                result.into_iter().map(|indexed| indexed.value).collect()
             }
             "input" => {
                 let result = channel
                     .read_input_registers(params, addr_range)
                     .await
                     .map_err(|e| anyhow::anyhow!("Failed to read input registers: {:?}", e))?;
-                result.into_iter().collect::<Vec<_>>()
+                // Extract .value from each Indexed<u16>
+                result.into_iter().map(|indexed| indexed.value).collect()
             }
             "coil" => {
                 let coil_range = AddressRange::try_from(register.address, 1)
@@ -796,8 +795,8 @@ impl ModbusClient {
                     .read_coils(params, coil_range)
                     .await
                     .map_err(|e| anyhow::anyhow!("Failed to read coil: {:?}", e))?;
-                // Convert bool to u16 (first coil only)
-                let first_coil = coils.into_iter().next().unwrap_or(false);
+                // Extract first coil value and convert bool to u16
+                let first_coil = coils.into_iter().next().map(|i| i.value).unwrap_or(false);
                 vec![if first_coil { 1u16 } else { 0u16 }]
             }
             "discrete" => {
@@ -807,8 +806,8 @@ impl ModbusClient {
                     .read_discrete_inputs(params, di_range)
                     .await
                     .map_err(|e| anyhow::anyhow!("Failed to read discrete input: {:?}", e))?;
-                // Convert bool to u16 (first input only)
-                let first_input = inputs.into_iter().next().unwrap_or(false);
+                // Extract first input value and convert bool to u16
+                let first_input = inputs.into_iter().next().map(|i| i.value).unwrap_or(false);
                 vec![if first_input { 1u16 } else { 0u16 }]
             }
             other => return Err(anyhow::anyhow!("Unknown register type: {}", other)),
@@ -858,9 +857,10 @@ impl ModbusClient {
         // Create request parameters with unit ID and timeout
         let params = RequestParam::new(self.unit_id, MODBUS_TIMEOUT);
 
-        // rodbus uses write_single_register(params, address, value)
+        // rodbus uses Indexed<u16> to combine address and value
+        let indexed_value = rodbus::Indexed::new(address, value);
         channel
-            .write_single_register(params, address, value)
+            .write_single_register(params, indexed_value)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to write register: {:?}", e))?;
 
@@ -888,9 +888,10 @@ impl ModbusClient {
         // Create request parameters with unit ID and timeout
         let params = RequestParam::new(self.unit_id, MODBUS_TIMEOUT);
 
-        // rodbus uses write_single_coil(params, address, value)
+        // rodbus uses Indexed<bool> to combine address and value
+        let indexed_value = rodbus::Indexed::new(address, value);
         channel
-            .write_single_coil(params, address, value)
+            .write_single_coil(params, indexed_value)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to write coil: {:?}", e))?;
 
@@ -1168,6 +1169,7 @@ impl ModbusManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::ModbusTlsConfig;
 
     #[test]
     fn test_register_value_serialization() {

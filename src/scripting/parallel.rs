@@ -32,7 +32,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
-use super::{Action, ActionResult, ActionType};
+use super::{Action, ActionResult};
 
 // ============================================================================
 // Types
@@ -402,6 +402,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::ActionType;  // Only used in tests
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
