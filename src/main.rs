@@ -860,8 +860,8 @@ async fn init_hardware(state: &Arc<RwLock<AppState>>) {
             }
         }
 
-        // Log connected device info
-        let results = handle.read_all().await;
+        // Log connected device info (v1.2.2: use parallel reads)
+        let results = handle.read_all_parallel().await;
         for result in results {
             if result.errors.is_empty() {
                 info!(

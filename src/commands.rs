@@ -644,8 +644,8 @@ impl CommandHandler {
             }
         };
 
-        // Read all devices (device filtering can be added via handle if needed)
-        let results = handle.read_all().await;
+        // v1.2.2: Use parallel reads for lower latency
+        let results = handle.read_all_parallel().await;
         let data: Vec<Value> = results
             .iter()
             .map(|result| {

@@ -247,7 +247,8 @@ impl TelemetryCollector {
         };
 
         if let Some(handle) = modbus_handle {
-            let modbus_results = handle.read_all().await;
+            // v1.2.2: Use parallel reads for lower latency
+            let modbus_results = handle.read_all_parallel().await;
             let mut modbus_data = Vec::new();
 
             for result in modbus_results {

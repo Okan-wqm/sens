@@ -799,7 +799,8 @@ impl ScriptEngine {
         };
 
         if let Some(handle) = modbus_handle {
-            let results = handle.read_all().await;
+            // v1.2.2: Use parallel reads for lower latency
+            let results = handle.read_all_parallel().await;
             for result in results {
                 for value in &result.values {
                     self.context.set_sensor(&value.name, value.scaled_value);
