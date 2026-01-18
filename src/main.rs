@@ -23,6 +23,7 @@ mod offline_queue;
 mod provisioning;
 mod resilience;
 mod scripting;
+mod security;  // v1.2.2: Security hardening utilities
 mod shutdown;
 mod telemetry;
 

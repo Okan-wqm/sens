@@ -1,12 +1,136 @@
 //! Configuration management for Suderra Edge Agent
 //!
 //! Handles loading and saving of agent configuration from YAML files.
+//!
+//! # Security Hardening (v1.2.2)
+//! - MQTT credentials use `secrecy` crate (zeroize on drop)
+//! - TLS is now default for Modbus TCP connections
+//! - Certificate file permissions are validated on Unix
+//! - `insecure_skip_verify` is compile-time disabled in release builds
 
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use secrecy::{ExposeSecret, Secret};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::fmt;
 use std::fs;
 use std::path::PathBuf;
 use tracing::{debug, info, warn};
+
+// ============================================================================
+// Secret<String> Serialization Helpers (v1.2.2)
+// ============================================================================
+
+/// Serialize Option<Secret<String>> - exposes inner value for YAML storage
+fn serialize_secret_option<S>(
+    value: &Option<Secret<String>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match value {
+        Some(secret) => serializer.serialize_some(secret.expose_secret()),
+        None => serializer.serialize_none(),
+    }
+}
+
+/// Deserialize Option<Secret<String>> - wraps value in Secret
+fn deserialize_secret_option<'de, D>(deserializer: D) -> Result<Option<Secret<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let opt: Option<String> = Option::deserialize(deserializer)?;
+    Ok(opt.map(Secret::new))
+}
+
+// ============================================================================
+// Private Key Permission Validation (v1.2.2 - IEC 62443 FR4)
+// ============================================================================
+
+/// Validate that a private key file has secure permissions (Unix only)
+///
+/// Private key files should only be readable by owner (mode 0600 or 0400).
+/// This prevents other users from accessing sensitive credentials.
+#[cfg(unix)]
+fn validate_key_file_permissions(path: &std::path::Path) -> std::result::Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let metadata =
+        std::fs::metadata(path).map_err(|e| format!("Cannot read file metadata: {}", e))?;
+
+    let mode = metadata.permissions().mode();
+    let world_readable = mode & 0o004 != 0;
+    let group_readable = mode & 0o040 != 0;
+
+    if world_readable || group_readable {
+        return Err(format!(
+            "Insecure permissions {:04o} on {}: private keys should be 0600 or 0400",
+            mode & 0o777,
+            path.display()
+        ));
+    }
+
+    Ok(())
+}
+
+// ============================================================================
+// Platform-Aware GPIO Validation (v1.2.2)
+// ============================================================================
+
+/// GPIO platform type for validation
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GpioPlatform {
+    /// Raspberry Pi (BCM GPIO 0-27)
+    RaspberryPi,
+    /// Revolution Pi (extended GPIO range)
+    RevolutionPi,
+    /// Generic Linux GPIO (sysfs/gpiod)
+    GenericLinux,
+    /// Unknown/Simulation
+    Unknown,
+}
+
+impl GpioPlatform {
+    /// Get valid GPIO pin range for this platform
+    pub fn valid_range(&self) -> (u8, u8) {
+        match self {
+            GpioPlatform::RaspberryPi => (0, 27),
+            GpioPlatform::RevolutionPi => (0, 127), // RevPi has extended GPIO
+            GpioPlatform::GenericLinux => (0, 255), // Generic allows up to 255
+            GpioPlatform::Unknown => (0, 255),      // Simulation mode - allow all
+        }
+    }
+}
+
+/// Detect current GPIO platform based on system info
+#[cfg(target_os = "linux")]
+fn detect_gpio_platform() -> GpioPlatform {
+    use std::path::Path;
+
+    // Check for Raspberry Pi
+    if Path::new("/proc/device-tree/model").exists() {
+        if let Ok(model) = std::fs::read_to_string("/proc/device-tree/model") {
+            if model.contains("Raspberry Pi") {
+                return GpioPlatform::RaspberryPi;
+            }
+            if model.contains("Revolution Pi") || model.contains("RevPi") {
+                return GpioPlatform::RevolutionPi;
+            }
+        }
+    }
+
+    // Check for generic gpiochip
+    if Path::new("/dev/gpiochip0").exists() {
+        return GpioPlatform::GenericLinux;
+    }
+
+    GpioPlatform::Unknown
+}
+
+#[cfg(not(target_os = "linux"))]
+fn detect_gpio_platform() -> GpioPlatform {
+    GpioPlatform::Unknown
+}
 
 /// Default config file path
 const DEFAULT_CONFIG_PATH: &str = "/etc/suderra/config.yaml";
@@ -89,7 +213,7 @@ pub struct MqttTlsConfig {
 }
 
 /// MQTT configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct MqttConfig {
     /// MQTT broker hostname
     pub broker: Option<String>,
@@ -102,7 +226,13 @@ pub struct MqttConfig {
     pub username: Option<String>,
 
     /// MQTT password (set after activation)
-    pub password: Option<String>,
+    /// v1.2.2: Uses secrecy crate for zeroize on drop (IEC 62443 FR4)
+    #[serde(
+        default,
+        serialize_with = "serialize_secret_option",
+        deserialize_with = "deserialize_secret_option"
+    )]
+    pub password: Option<Secret<String>>,
 
     /// TLS configuration (optional, IEC 62443 SL2)
     #[serde(default)]
@@ -123,6 +253,23 @@ pub struct MqttConfig {
     /// Last Will topic for device status (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_will_topic: Option<String>,
+}
+
+/// Custom Debug implementation that masks the password
+impl fmt::Debug for MqttConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MqttConfig")
+            .field("broker", &self.broker)
+            .field("port", &self.port)
+            .field("username", &self.username)
+            .field("password", &self.password.as_ref().map(|_| "[REDACTED]"))
+            .field("tls", &self.tls)
+            .field("topics", &self.topics)
+            .field("keepalive_secs", &self.keepalive_secs)
+            .field("clean_session", &self.clean_session)
+            .field("last_will_topic", &self.last_will_topic)
+            .finish()
+    }
 }
 
 /// MQTT topic patterns
@@ -853,12 +1000,18 @@ impl AgentConfig {
             }
         }
 
-        // Validate GPIO pins (Raspberry Pi has GPIO 0-27)
+        // v1.2.2: Platform-aware GPIO validation
+        let gpio_platform = detect_gpio_platform();
+        let (min_pin, max_pin) = gpio_platform.valid_range();
+
         for gpio in &self.gpio {
-            if gpio.pin > 27 {
+            if gpio.pin < min_pin || gpio.pin > max_pin {
                 anyhow::bail!(
-                    "Invalid GPIO pin {}: Raspberry Pi only has GPIO 0-27",
-                    gpio.pin
+                    "Invalid GPIO pin {}: {:?} supports GPIO {}-{}",
+                    gpio.pin,
+                    gpio_platform,
+                    min_pin,
+                    max_pin
                 );
             }
 
@@ -947,12 +1100,20 @@ impl AgentConfig {
                     }
                 }
                 if let Some(ref key_path) = device.tls.client_key_path {
-                    if !std::path::Path::new(key_path).exists() {
+                    let key_path_obj = std::path::Path::new(key_path);
+                    if !key_path_obj.exists() {
                         anyhow::bail!(
                             "Modbus device '{}': client key not found: {}",
                             device.name,
                             key_path
                         );
+                    }
+                    // v1.2.2: Validate private key file permissions (Unix only)
+                    #[cfg(unix)]
+                    {
+                        if let Err(e) = validate_key_file_permissions(key_path_obj) {
+                            anyhow::bail!("Modbus device '{}': {}", device.name, e);
+                        }
                     }
                 }
                 // Validate mTLS consistency
@@ -963,12 +1124,22 @@ impl AgentConfig {
                     );
                 }
 
-                // Warn about insecure configuration
+                // v1.2.2: Block insecure configuration in release builds
                 if device.tls.insecure_skip_verify {
-                    warn!(
-                        "Modbus device '{}': TLS verification disabled - NOT recommended for production",
-                        device.name
-                    );
+                    #[cfg(not(debug_assertions))]
+                    {
+                        anyhow::bail!(
+                            "Modbus device '{}': insecure_skip_verify is not allowed in release builds (IEC 62443 FR4)",
+                            device.name
+                        );
+                    }
+                    #[cfg(debug_assertions)]
+                    {
+                        warn!(
+                            "Modbus device '{}': TLS verification disabled - NOT allowed in production",
+                            device.name
+                        );
+                    }
                 }
             }
         }
@@ -1004,8 +1175,16 @@ impl AgentConfig {
                 }
             }
             if let Some(ref key_path) = self.mqtt.tls.client_key_path {
-                if !std::path::Path::new(key_path).exists() {
+                let key_path_obj = std::path::Path::new(key_path);
+                if !key_path_obj.exists() {
                     anyhow::bail!("MQTT client key not found: {}", key_path);
+                }
+                // v1.2.2: Validate private key file permissions (Unix only)
+                #[cfg(unix)]
+                {
+                    if let Err(e) = validate_key_file_permissions(key_path_obj) {
+                        anyhow::bail!("MQTT: {}", e);
+                    }
                 }
             }
             // Validate mTLS consistency - if one is set, both must be set

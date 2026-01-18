@@ -2293,6 +2293,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "secrecy"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9bd1c54ea06cfd2f6b63219704de0b9b4f72dcc2b8fdef820be6cd799780e91e"
+dependencies = [
+ "serde",
+ "zeroize",
+]
+
+[[package]]
 name = "security-framework"
 version = "2.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2532,7 +2542,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "suderra-agent"
-version = "1.2.1"
+version = "1.2.2"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
@@ -2557,6 +2567,7 @@ dependencies = [
  "rumqttc",
  "rusqlite",
  "sd-notify",
+ "secrecy",
  "serde",
  "serde_json",
  "serde_yaml",

@@ -1,6 +1,6 @@
 [package]
 name = "suderra-agent"
-version = "1.2.1"
+version = "1.2.2"
 edition = "2021"
 authors = ["Suderra <info@suderra.com>"]
 description = "Suderra Edge Agent for Industrial IoT"
@@ -35,6 +35,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # Error handling
 anyhow = "1.0"
 thiserror = "1.0"
+
+# Secure secret handling (zeroize on drop) - v1.2.2 security hardening
+secrecy = { version = "0.8", features = ["serde"] }
 
 # System info for telemetry
 sysinfo = "0.30"

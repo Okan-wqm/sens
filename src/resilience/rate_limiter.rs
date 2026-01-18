@@ -9,14 +9,19 @@
 //! Uses atomic operations for lock-free, concurrent access.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
-/// Get current timestamp in milliseconds since UNIX epoch
+// Monotonic time anchor (NTP-safe)
+static BOOT_INSTANT: OnceLock<Instant> = OnceLock::new();
+
+/// Get monotonic milliseconds since program start
+///
+/// v1.2.2: Uses Instant instead of SystemTime to prevent NTP time manipulation.
 fn now_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
+    let boot = BOOT_INSTANT.get_or_init(Instant::now);
+
+    boot.elapsed().as_millis() as u64
 }
 
 /// Token Bucket Rate Limiter
