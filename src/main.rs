@@ -50,8 +50,8 @@ fn generate_default_config() -> Result<()> {
     use std::fs;
     use std::path::Path;
 
-    let config_path = std::env::var("SUDERRA_CONFIG")
-        .unwrap_or_else(|_| "/etc/suderra/config.yaml".to_string());
+    let config_path =
+        std::env::var("SUDERRA_CONFIG").unwrap_or_else(|_| "/etc/suderra/config.yaml".to_string());
 
     // Check if config already exists
     if Path::new(&config_path).exists() {
@@ -294,7 +294,9 @@ fn main() {
                 println!("    --help       Print this help message");
                 println!();
                 println!("ENVIRONMENT:");
-                println!("    SUDERRA_CONFIG    Path to config file (default: /etc/suderra/config.yaml)");
+                println!(
+                    "    SUDERRA_CONFIG    Path to config file (default: /etc/suderra/config.yaml)"
+                );
                 println!("    RUST_LOG          Log level filter (e.g., debug, info, warn)");
                 return;
             }

@@ -156,7 +156,9 @@ impl ScriptContext {
                             .unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
                         offset.from_utc_datetime(&utc_now.naive_utc())
                     } else {
-                        FixedOffset::east_opt(0).unwrap().from_utc_datetime(&utc_now.naive_utc())
+                        FixedOffset::east_opt(0)
+                            .unwrap()
+                            .from_utc_datetime(&utc_now.naive_utc())
                     };
                     match source_name {
                         "hour" => Some(Value::from(local_time.hour())),

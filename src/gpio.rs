@@ -594,7 +594,12 @@ impl GpioActor {
             } else {
                 output_pin.set_low();
             }
-            debug!("Set GPIO pin {} to {} (invert={:?})", pin, value, config.map(|c| c.invert));
+            debug!(
+                "Set GPIO pin {} to {} (invert={:?})",
+                pin,
+                value,
+                config.map(|c| c.invert)
+            );
             Ok(())
         } else {
             Err(anyhow::anyhow!("Pin {} not configured as output", pin))
@@ -610,9 +615,16 @@ impl GpioActor {
         {
             // Apply invert logic to write path (v2.1.1 - issue #26 fix)
             let actual_value = if config.invert { !value } else { value };
-            let state = if actual_value { PinState::High } else { PinState::Low };
+            let state = if actual_value {
+                PinState::High
+            } else {
+                PinState::Low
+            };
             self.simulated_states.insert(pin, state);
-            debug!("Simulated GPIO pin {} set to {:?} (invert={})", pin, state, config.invert);
+            debug!(
+                "Simulated GPIO pin {} set to {:?} (invert={})",
+                pin, state, config.invert
+            );
             Ok(())
         } else {
             Err(anyhow::anyhow!("Pin {} not configured as output", pin))

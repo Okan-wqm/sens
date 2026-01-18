@@ -450,9 +450,9 @@ mod tests {
 
         // Wrap-around range (v2.1.1 - night hours like 22-6)
         assert!(TriggerManager::match_cron_field_static("22-6", 23)); // 23 is in 22-6
-        assert!(TriggerManager::match_cron_field_static("22-6", 0));  // 0 is in 22-6
-        assert!(TriggerManager::match_cron_field_static("22-6", 3));  // 3 is in 22-6
-        assert!(TriggerManager::match_cron_field_static("22-6", 6));  // 6 is in 22-6
+        assert!(TriggerManager::match_cron_field_static("22-6", 0)); // 0 is in 22-6
+        assert!(TriggerManager::match_cron_field_static("22-6", 3)); // 3 is in 22-6
+        assert!(TriggerManager::match_cron_field_static("22-6", 6)); // 6 is in 22-6
         assert!(!TriggerManager::match_cron_field_static("22-6", 12)); // 12 is NOT in 22-6
         assert!(!TriggerManager::match_cron_field_static("22-6", 10)); // 10 is NOT in 22-6
 
