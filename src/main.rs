@@ -71,7 +71,8 @@ pub struct AppState {
 
     /// Shared script storage (v2.2 - singleton for CommandHandler and ScriptEngine)
     /// This ensures both components see the same script state
-    pub script_storage: Arc<tokio::sync::RwLock<ScriptStorage>>,
+    /// v1.2.0: Internal RwLock for thread-safe access (no external lock needed)
+    pub script_storage: Arc<ScriptStorage>,
 
     /// Activation state
     pub is_activated: bool,
@@ -81,22 +82,30 @@ pub struct AppState {
 impl AppState {
     /// Create new AppState (v2.2 - with shared ScriptStorage)
     ///
-    /// Note: Hardware handles will be initialized in LocalSet context
+    /// Note: Hardware handles will be initialized in LocalSet context.
+    /// Script storage init is async and must be called separately via `init_script_storage()`.
     pub fn new(config: AgentConfig) -> Self {
-        // Initialize shared script storage (v2.2 singleton pattern)
-        let mut script_storage = ScriptStorage::new(None);
-        if let Err(e) = script_storage.init() {
-            warn!("Script storage initialization failed: {}", e);
-        }
+        // Create shared script storage (v2.2 singleton pattern)
+        // v1.2.0: ScriptStorage now has internal RwLock, no external lock needed
+        let script_storage = ScriptStorage::new(None);
 
         Self {
             config,
             mqtt_client: None,
             modbus_handle: None,
             gpio_handle: None,
-            script_storage: Arc::new(tokio::sync::RwLock::new(script_storage)),
+            script_storage: Arc::new(script_storage),
             is_activated: false,
             tenant_id: None,
+        }
+    }
+
+    /// Initialize script storage (v1.2.0 - async initialization)
+    ///
+    /// Must be called after creating AppState to load scripts from disk.
+    pub async fn init_script_storage(&self) {
+        if let Err(e) = self.script_storage.init().await {
+            warn!("Script storage initialization failed: {}", e);
         }
     }
 
@@ -120,18 +129,6 @@ impl AppState {
             info!(
                 "GPIO actor initialized with {} pins",
                 self.config.gpio.len()
-            );
-        }
-    }
-
-    /// Legacy: Initialize Modbus handle only
-    #[deprecated(note = "Use init_hardware_handles instead")]
-    pub fn init_modbus(&mut self) {
-        if !self.config.modbus.is_empty() {
-            self.modbus_handle = Some(ModbusHandle::new(self.config.modbus.clone()));
-            info!(
-                "Modbus actor initialized with {} devices",
-                self.config.modbus.len()
             );
         }
     }
@@ -196,6 +193,12 @@ async fn async_main() -> Result<()> {
 
     // Create shared state
     let state = Arc::new(RwLock::new(AppState::new(config.clone())));
+
+    // Initialize script storage (v1.2.0 - async initialization for RwLock)
+    {
+        let state_guard = state.read().await;
+        state_guard.init_script_storage().await;
+    }
 
     // Setup graceful shutdown
     let shutdown = match setup_shutdown_handler() {

@@ -15,6 +15,23 @@ use tracing::{debug, error, info, warn};
 use crate::error::{ActivationErrorCode, AgentError};
 use crate::AppState;
 
+/// Mask a sensitive token for logging purposes (IEC 62443 SL2 FR3)
+///
+/// Shows first 4 and last 4 characters with ellipsis in between.
+/// For short tokens (< 12 chars), shows only asterisks.
+///
+/// # Security
+/// Prevents token leakage in log files while allowing debugging.
+fn mask_token(token: &str) -> String {
+    if token.len() >= 12 {
+        format!("{}...{}", &token[..4], &token[token.len() - 4..])
+    } else if token.len() > 0 {
+        "*".repeat(token.len().min(8))
+    } else {
+        "(empty)".to_string()
+    }
+}
+
 /// Provisioning client for device activation
 pub struct ProvisioningClient {
     state: Arc<RwLock<AppState>>,
@@ -41,13 +58,27 @@ pub struct DeviceFingerprint {
 }
 
 /// Activation request sent to cloud API
-#[derive(Debug, Serialize)]
+///
+/// # Security Note (v1.2.0)
+/// Custom Debug implementation masks the token to prevent log leakage.
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivationRequest {
     pub device_id: String,
     pub token: String,
     pub fingerprint: DeviceFingerprint,
     pub agent_version: String,
+}
+
+impl std::fmt::Debug for ActivationRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ActivationRequest")
+            .field("device_id", &self.device_id)
+            .field("token", &mask_token(&self.token))
+            .field("fingerprint", &self.fingerprint)
+            .field("agent_version", &self.agent_version)
+            .finish()
+    }
 }
 
 /// Activation response from cloud API (snake_case per v1.1 spec)
@@ -104,7 +135,12 @@ impl ProvisioningClient {
         // Collect device fingerprint
         info!("Collecting device fingerprint...");
         let fingerprint = self.collect_fingerprint().await;
-        debug!("Fingerprint: {:?}", fingerprint);
+        // Log fingerprint collection without exposing full hardware IDs (v1.2.0 security)
+        debug!(
+            "Fingerprint collected: {} MAC address(es), hostname={:?}",
+            fingerprint.mac_addresses.len(),
+            fingerprint.hostname.as_deref().unwrap_or("(none)")
+        );
 
         // Build activation request
         let request = ActivationRequest {
@@ -132,7 +168,12 @@ impl ProvisioningClient {
             .await
             .context("Failed to read response body")?;
 
-        debug!("Response status: {}, body: {}", status, body);
+        // Log response status only - body may contain MQTT credentials (v1.2.0 security)
+        debug!(
+            "Response status: {}, body_len: {} bytes",
+            status,
+            body.len()
+        );
 
         // Handle response
         if status.is_success() {
@@ -159,12 +200,17 @@ impl ProvisioningClient {
             return Err(AgentError::Provisioning(error_response.error).into());
         }
 
-        // Unknown error
+        // Unknown error - truncate body in logs to prevent credential leakage (v1.2.0 security)
+        let truncated_body = if body.len() > 100 {
+            format!("{}...(truncated)", &body[..100])
+        } else {
+            body.clone()
+        };
         error!(
-            "Activation failed with status {} and body: {}",
-            status, body
+            "Activation failed with status {}: {}",
+            status, truncated_body
         );
-        Err(AgentError::Unknown(format!("HTTP {}: {}", status, body)).into())
+        Err(AgentError::Unknown(format!("HTTP {}", status)).into())
     }
 
     /// Collect device fingerprint
@@ -284,5 +330,43 @@ mod tests {
         let json = serde_json::to_string(&request).unwrap();
         assert!(json.contains("deviceId")); // camelCase for request
         assert!(json.contains("agentVersion"));
+    }
+
+    #[test]
+    fn test_mask_token() {
+        // Long token shows first 4 and last 4
+        assert_eq!(mask_token("1234567890abcdef"), "1234...cdef");
+
+        // Short token (< 12 chars) shows asterisks
+        assert_eq!(mask_token("short"), "*****");
+
+        // Empty token
+        assert_eq!(mask_token(""), "(empty)");
+
+        // Exactly 12 chars
+        assert_eq!(mask_token("123456789012"), "1234...9012");
+    }
+
+    #[test]
+    fn test_activation_request_debug_masks_token() {
+        let request = ActivationRequest {
+            device_id: "device-123".to_string(),
+            token: "super-secret-token-12345".to_string(),
+            fingerprint: DeviceFingerprint {
+                cpu_serial: None,
+                mac_addresses: vec![],
+                machine_id: None,
+                hostname: None,
+            },
+            agent_version: "1.0.0".to_string(),
+        };
+
+        let debug_output = format!("{:?}", request);
+
+        // Debug should NOT contain the actual token
+        assert!(!debug_output.contains("super-secret-token-12345"));
+
+        // But should contain the masked version
+        assert!(debug_output.contains("supe...2345"));
     }
 }

@@ -81,14 +81,25 @@ pub struct QueueStats {
     pub by_priority: [usize; 4],
     /// Oldest message age in seconds
     pub oldest_message_age_secs: Option<u64>,
-    /// Total bytes used
+    /// Total bytes used (payload + topic)
     pub total_bytes: usize,
+    /// Database file size in bytes (v1.2.0)
+    pub db_size_bytes: u64,
+    /// Percentage of disk limit used (v1.2.0)
+    pub disk_usage_percent: f32,
 }
+
+/// Default maximum disk size: 50 MB
+const DEFAULT_MAX_DISK_BYTES: u64 = 50 * 1024 * 1024;
 
 /// Offline message queue with SQLite persistence
 ///
 /// # Thread Safety
 /// Uses interior mutability with Mutex for safe concurrent access.
+///
+/// # Resource Limits (v1.2.0)
+/// Enforces both message count limit and disk size limit to prevent
+/// unbounded resource consumption (IEC 62443 SL2 FR5).
 pub struct OfflineQueue {
     /// Database connection (protected by mutex for sync access)
     conn: Mutex<Connection>,
@@ -96,6 +107,8 @@ pub struct OfflineQueue {
     max_size: usize,
     /// Maximum message age before expiration (seconds)
     max_age_secs: u64,
+    /// Maximum disk size in bytes (v1.2.0)
+    max_disk_bytes: u64,
 }
 
 impl OfflineQueue {
@@ -106,6 +119,22 @@ impl OfflineQueue {
     /// * `max_size` - Maximum number of messages to store
     /// * `max_age_secs` - Maximum age before messages expire (0 = no expiration)
     pub fn new(db_path: &Path, max_size: usize, max_age_secs: u64) -> Result<Self> {
+        Self::with_disk_limit(db_path, max_size, max_age_secs, DEFAULT_MAX_DISK_BYTES)
+    }
+
+    /// Create a new offline queue with custom disk limit (v1.2.0)
+    ///
+    /// # Arguments
+    /// * `db_path` - Path to SQLite database file
+    /// * `max_size` - Maximum number of messages to store
+    /// * `max_age_secs` - Maximum age before messages expire (0 = no expiration)
+    /// * `max_disk_bytes` - Maximum disk space in bytes (0 = no limit)
+    pub fn with_disk_limit(
+        db_path: &Path,
+        max_size: usize,
+        max_age_secs: u64,
+        max_disk_bytes: u64,
+    ) -> Result<Self> {
         let conn = Connection::open(db_path)
             .with_context(|| format!("Failed to open queue database: {}", db_path.display()))?;
 
@@ -113,12 +142,15 @@ impl OfflineQueue {
             conn: Mutex::new(conn),
             max_size,
             max_age_secs,
+            max_disk_bytes,
         };
 
         queue.init_schema()?;
         info!(
-            "Offline queue initialized: max_size={}, max_age_secs={}",
-            max_size, max_age_secs
+            "Offline queue initialized: max_size={}, max_age_secs={}, max_disk_mb={}",
+            max_size,
+            max_age_secs,
+            max_disk_bytes / (1024 * 1024)
         );
 
         Ok(queue)
@@ -131,11 +163,53 @@ impl OfflineQueue {
         let queue = Self {
             conn: Mutex::new(conn),
             max_size,
-            max_age_secs: 0, // No expiration
+            max_age_secs: 0,   // No expiration
+            max_disk_bytes: 0, // No disk limit for in-memory
         };
 
         queue.init_schema()?;
         Ok(queue)
+    }
+
+    /// Get current database file size in bytes (v1.2.0)
+    ///
+    /// Uses SQLite's page_count * page_size for accurate measurement.
+    fn get_db_size(&self, conn: &Connection) -> u64 {
+        conn.query_row(
+            "SELECT page_count * page_size as size FROM pragma_page_count(), pragma_page_size()",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|size| size as u64)
+        .unwrap_or(0)
+    }
+
+    /// Evict oldest low-priority messages until disk usage is under limit (v1.2.0)
+    fn evict_for_disk_space(&self, conn: &Connection, evict_count: usize) -> Result<usize> {
+        let result = conn.execute(
+            &format!(
+                "DELETE FROM message_queue WHERE id IN (
+                    SELECT id FROM message_queue
+                    ORDER BY priority ASC, created_at ASC
+                    LIMIT {}
+                )",
+                evict_count
+            ),
+            [],
+        );
+
+        match result {
+            Ok(deleted) => {
+                if deleted > 0 {
+                    warn!("Evicted {} messages due to disk space limit", deleted);
+                }
+                Ok(deleted)
+            }
+            Err(e) => Err(anyhow::anyhow!(
+                "Failed to evict messages for disk space: {}",
+                e
+            )),
+        }
     }
 
     /// Initialize database schema
@@ -177,7 +251,8 @@ impl OfflineQueue {
 
     /// Enqueue a message
     ///
-    /// If queue is at capacity, the oldest low-priority message is removed.
+    /// If queue is at capacity (message count or disk size), the oldest
+    /// low-priority messages are removed (v1.2.0: disk size limit).
     pub fn enqueue(
         &self,
         topic: &str,
@@ -193,9 +268,19 @@ impl OfflineQueue {
             .query_row("SELECT COUNT(*) FROM message_queue", [], |row| row.get(0))
             .unwrap_or(0);
 
-        // If at capacity, remove oldest low-priority message
+        // If at message count capacity, remove oldest low-priority message
         if current_size >= self.max_size {
             self.evict_one(&conn)?;
+        }
+
+        // v1.2.0: Check disk size limit and evict if necessary
+        if self.max_disk_bytes > 0 {
+            let db_size = self.get_db_size(&conn);
+            if db_size >= self.max_disk_bytes {
+                // Evict 10 oldest messages at a time to make room
+                let evict_count = (current_size / 10).max(5).min(50);
+                self.evict_for_disk_space(&conn, evict_count)?;
+            }
         }
 
         let now = chrono::Utc::now().timestamp_millis();
@@ -429,7 +514,7 @@ impl OfflineQueue {
                 ((now - oldest) / 1000) as u64
             });
 
-        // Total bytes
+        // Total bytes (payload + topic)
         let total_bytes: usize = conn
             .query_row(
                 "SELECT COALESCE(SUM(LENGTH(topic) + LENGTH(payload)), 0) FROM message_queue",
@@ -438,11 +523,21 @@ impl OfflineQueue {
             )
             .unwrap_or(0);
 
+        // v1.2.0: Database file size
+        let db_size_bytes = self.get_db_size(&conn);
+        let disk_usage_percent = if self.max_disk_bytes > 0 {
+            (db_size_bytes as f32 / self.max_disk_bytes as f32) * 100.0
+        } else {
+            0.0
+        };
+
         Ok(QueueStats {
             total_messages,
             by_priority,
             oldest_message_age_secs,
             total_bytes,
+            db_size_bytes,
+            disk_usage_percent,
         })
     }
 

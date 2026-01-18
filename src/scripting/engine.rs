@@ -95,7 +95,8 @@ impl ScanCycleStats {
 pub struct ScriptEngine {
     state: Arc<RwLock<AppState>>,
     /// Shared script storage (singleton pattern - v2.2)
-    storage: Arc<tokio::sync::RwLock<ScriptStorage>>,
+    /// v1.2.0: Internal RwLock for thread-safe access (no external lock needed)
+    storage: Arc<ScriptStorage>,
     trigger_manager: TriggerManager,
     context: ScriptContext,
     /// Execution limits for scripts
@@ -402,9 +403,10 @@ impl ScriptEngine {
         Ok(())
     }
 
-    /// Initialize the engine
+    /// Initialize the engine (v1.2.0 - async storage API)
     pub async fn init(&mut self) -> anyhow::Result<()> {
-        self.storage.write().await.init()?;
+        // v1.2.0: Use async init() with internal locking
+        self.storage.init().await?;
 
         // Load and apply program configuration from program.json (v2.1)
         if let Some(program_state) = self.load_program_state() {
@@ -421,10 +423,12 @@ impl ScriptEngine {
             }
         }
 
+        // v1.2.0: Use async count() with internal locking
+        let script_count = self.storage.count().await;
         info!(
             mode = ?self.execution_mode,
             scan_cycle_ms = self.scan_cycle_ms,
-            script_count = self.storage.read().await.count(),
+            script_count = script_count,
             fb_count = self.fb_registry.count(),
             "Script engine initialized"
         );
@@ -448,11 +452,12 @@ impl ScriptEngine {
 
     /// Load RETAIN variables from persistence into context
     /// v2.2: Now async to access shared storage
+    /// v1.2.0: Use async get_active() with internal locking
     async fn load_retain_variables(&mut self, persistence: Arc<SqlitePersistence>) {
         let mut loaded_count = 0;
 
-        // Load variables for each active script
-        let active_scripts = self.storage.read().await.get_active();
+        // Load variables for each active script (v1.2.0 - async API)
+        let active_scripts = self.storage.get_active().await;
         for script in active_scripts {
             let script_id = &script.definition.id;
 
@@ -503,10 +508,11 @@ impl ScriptEngine {
         Ok(())
     }
 
-    /// Run startup scripts
+    /// Run startup scripts (v1.2.0 - async storage API)
     async fn run_startup_scripts(&mut self) {
         // v2.2: get_active() now returns Vec<Script> (cloned for thread safety)
-        let active_scripts = self.storage.read().await.get_active();
+        // v1.2.0: Use async get_active() with internal locking
+        let active_scripts = self.storage.get_active().await;
         let startup_scripts: Vec<String> = active_scripts
             .into_iter()
             .filter(|s| {
@@ -564,7 +570,8 @@ impl ScriptEngine {
                 reload_counter = 0;
                 // v2.2: Using shared storage (singleton pattern) - load_all no longer needed
                 // Scripts are deployed via CommandHandler which shares same storage instance
-                let count = self.storage.read().await.count();
+                // v1.2.0: Use async count() with internal locking
+                let count = self.storage.count().await;
                 debug!("Active scripts in shared storage: {}", count);
             }
 
@@ -653,8 +660,8 @@ impl ScriptEngine {
                 reload_counter = 0;
 
                 // v2.2: Scripts use shared storage (singleton) - no reload needed
-                // Log count for monitoring
-                let count = self.storage.read().await.count();
+                // Log count for monitoring (v1.2.0 - async API)
+                let count = self.storage.count().await;
                 debug!(script_count = count, "Scripts in shared storage");
 
                 // Persist FB states periodically
@@ -820,11 +827,13 @@ impl ScriptEngine {
     /// Check all triggers and return scripts that should run (sorted by priority)
     /// Higher priority scripts execute first (v2.0)
     /// v2.2: Now async to access shared storage
+    /// v1.2.0: Use async get_active() with internal locking
     async fn check_all_triggers(&mut self) -> Vec<String> {
         // Collect scripts with their priorities
         let mut scripts_with_priority: Vec<(String, u8)> = Vec::new();
 
-        let active_scripts = self.storage.read().await.get_active();
+        // v1.2.0: Use async get_active()
+        let active_scripts = self.storage.get_active().await;
         for script in active_scripts {
             let script_id = &script.definition.id;
             let priority = script.definition.priority.value();
@@ -925,13 +934,13 @@ impl ScriptEngine {
             });
         }
 
-        let definition = {
-            let storage = self.storage.read().await;
-            let script = storage
-                .get(script_id)
-                .ok_or_else(|| anyhow::anyhow!("Script not found: {}", script_id))?;
-            script.definition.clone()
-        };
+        // v1.2.0: Use async get() with internal locking
+        let script = self
+            .storage
+            .get(script_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Script not found: {}", script_id))?;
+        let definition = script.definition.clone();
 
         // v2.2: Save previous script context for nested call restoration
         // This ensures that when script A calls script B, after B completes,
@@ -948,22 +957,16 @@ impl ScriptEngine {
             definition.name, definition.id, depth
         );
 
-        // Mark as running
-        {
-            let mut storage = self.storage.write().await;
-            if let Some(s) = storage.get_mut(script_id) {
-                s.status = ScriptStatus::Running;
-            }
-        }
+        // Mark as running (v1.2.0 - async API)
+        self.storage.set_running(script_id).await;
 
         // Check conditions
         if !self.evaluate_conditions(&definition.conditions) {
             debug!("Script {} conditions not met, skipping", script_id);
-            self.storage.write().await.update_result(
-                script_id,
-                true,
-                "Conditions not met - skipped",
-            );
+            // v1.2.0: Use async update_result()
+            self.storage
+                .update_result(script_id, true, "Conditions not met - skipped")
+                .await;
 
             return Ok(ExecutionResult {
                 script_id: script_id.to_string(),
@@ -1559,42 +1562,43 @@ impl ScriptEngine {
 
     // === Public API for script management ===
     // v2.2: All methods now async to use shared storage (singleton pattern)
+    // v1.2.0: Use async methods directly (internal locking)
 
     /// Add a script from definition
     pub async fn add_script(&mut self, definition: ScriptDefinition) -> anyhow::Result<()> {
-        self.storage.write().await.add_script(definition)
+        self.storage.add_script(definition).await
     }
 
     /// Delete a script
     pub async fn delete_script(&mut self, id: &str) -> anyhow::Result<bool> {
         self.trigger_manager.reset_script(id);
-        self.storage.write().await.delete(id)
+        self.storage.delete(id).await
     }
 
     /// Enable a script
     pub async fn enable_script(&mut self, id: &str) -> anyhow::Result<bool> {
-        self.storage.write().await.enable(id)
+        self.storage.enable(id).await
     }
 
     /// Disable a script
     pub async fn disable_script(&mut self, id: &str) -> anyhow::Result<bool> {
         self.trigger_manager.reset_script(id);
-        self.storage.write().await.disable(id)
+        self.storage.disable(id).await
     }
 
     /// List all scripts (returns cloned scripts for thread safety)
     pub async fn list_scripts(&self) -> Vec<Script> {
-        self.storage.read().await.get_all_cloned()
+        self.storage.get_all().await
     }
 
     /// Get script by ID (returns cloned script for thread safety)
     pub async fn get_script(&self, id: &str) -> Option<Script> {
-        self.storage.read().await.get(id).cloned()
+        self.storage.get(id).await
     }
 
     /// Get script count
     pub async fn script_count(&self) -> usize {
-        self.storage.read().await.count()
+        self.storage.count().await
     }
 }
 

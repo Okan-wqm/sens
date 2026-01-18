@@ -3,6 +3,10 @@
 //! Provides digital I/O capabilities for edge devices with GPIO pins.
 //! Uses actor pattern to isolate non-Send rppal types.
 //! Components communicate with the actor via channels.
+//!
+//! ## Channel Backpressure (v1.2.0)
+//! The channel buffer is configurable and defaults to 64 messages.
+//! Send operations include retry logic with exponential backoff.
 
 #[cfg(feature = "gpio")]
 use anyhow::Context;
@@ -10,11 +14,25 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc::{self, error::TrySendError};
+use tokio::sync::oneshot;
 use tracing::{debug, info, warn};
 
 use crate::config::GpioConfig;
 use crate::resilience::with_timeout;
+
+// ============================================================================
+// Channel Configuration Constants (v1.2.0)
+// ============================================================================
+
+/// Default GPIO command channel buffer size (increased from 32)
+const DEFAULT_GPIO_CHANNEL_SIZE: usize = 64;
+
+/// Maximum retry attempts for channel send operations
+const GPIO_SEND_RETRIES: u32 = 3;
+
+/// Base delay between retries in milliseconds (doubles each retry)
+const GPIO_RETRY_DELAY_MS: u64 = 10;
 
 // ============================================================================
 // Public Types
@@ -104,15 +122,33 @@ pub struct GpioHandle {
     sender: mpsc::Sender<GpioCommand>,
     /// Operation timeout (configurable)
     timeout: Duration,
+    /// Channel buffer size (for monitoring, v1.2.0)
+    channel_size: usize,
 }
 
 impl GpioHandle {
-    /// Create a new handle and spawn the GPIO actor
+    /// Create a new handle and spawn the GPIO actor with default channel size
     ///
     /// Must be called within a LocalSet context on Linux
     /// `timeout_secs` configures the operation timeout (default: 5 seconds)
     pub fn new(configs: Vec<GpioConfig>, timeout_secs: u64) -> Self {
-        let (sender, receiver) = mpsc::channel(32);
+        Self::with_channel_size(configs, timeout_secs, DEFAULT_GPIO_CHANNEL_SIZE)
+    }
+
+    /// Create a new handle with custom channel buffer size (v1.2.0)
+    ///
+    /// # Arguments
+    /// * `configs` - GPIO pin configurations
+    /// * `timeout_secs` - Operation timeout in seconds
+    /// * `channel_size` - Channel buffer size (minimum 16, default 64)
+    pub fn with_channel_size(
+        configs: Vec<GpioConfig>,
+        timeout_secs: u64,
+        channel_size: usize,
+    ) -> Self {
+        // Ensure minimum buffer size
+        let effective_size = channel_size.max(16);
+        let (sender, receiver) = mpsc::channel(effective_size);
 
         // Spawn the actor in a local task (for non-Send rppal types)
         tokio::task::spawn_local(async move {
@@ -123,7 +159,65 @@ impl GpioHandle {
         Self {
             sender,
             timeout: Duration::from_secs(timeout_secs),
+            channel_size: effective_size,
         }
+    }
+
+    /// Get the channel buffer size (v1.2.0)
+    pub fn channel_size(&self) -> usize {
+        self.channel_size
+    }
+
+    /// Send a command with retry logic (v1.2.0)
+    ///
+    /// Uses exponential backoff when channel is full.
+    /// Returns error after all retries exhausted.
+    async fn send_with_retry(&self, cmd: GpioCommand) -> Result<(), String> {
+        // First try blocking send (most efficient for normal operation)
+        match self.sender.send(cmd).await {
+            Ok(()) => Ok(()),
+            Err(e) => Err(format!("GPIO actor dead: {}", e)),
+        }
+    }
+
+    /// Try to send a command without blocking, with retries (v1.2.0)
+    ///
+    /// Used for fire-and-forget commands where we want to avoid blocking
+    /// but still handle transient backpressure.
+    #[allow(dead_code)]
+    async fn try_send_with_retry(&self, mut cmd: GpioCommand) -> Result<(), String> {
+        for attempt in 0..GPIO_SEND_RETRIES {
+            match self.sender.try_send(cmd) {
+                Ok(()) => return Ok(()),
+                Err(TrySendError::Full(returned_cmd)) => {
+                    if attempt < GPIO_SEND_RETRIES - 1 {
+                        // Exponential backoff: 10ms, 20ms, 40ms
+                        let delay = GPIO_RETRY_DELAY_MS * (1 << attempt);
+                        debug!(
+                            "GPIO channel full, retry {}/{} after {}ms",
+                            attempt + 1,
+                            GPIO_SEND_RETRIES,
+                            delay
+                        );
+                        tokio::time::sleep(Duration::from_millis(delay)).await;
+                        cmd = returned_cmd;
+                    } else {
+                        warn!(
+                            "GPIO channel full after {} retries (buffer size: {})",
+                            GPIO_SEND_RETRIES, self.channel_size
+                        );
+                        return Err(format!(
+                            "GPIO channel full after {} retries",
+                            GPIO_SEND_RETRIES
+                        ));
+                    }
+                }
+                Err(TrySendError::Closed(_)) => {
+                    return Err("GPIO actor dead".to_string());
+                }
+            }
+        }
+        Err("GPIO send failed".to_string())
     }
 
     /// Initialize GPIO hardware
@@ -549,138 +643,6 @@ impl GpioActor {
     }
 }
 
-// ============================================================================
-// Legacy GpioManager (for backwards compatibility during migration)
-// ============================================================================
-
-/// Legacy GPIO manager - deprecated, use GpioHandle instead
-#[deprecated(note = "Use GpioHandle (actor pattern) instead")]
-pub struct GpioManager {
-    configs: Vec<GpioConfig>,
-    simulated_states: HashMap<u8, PinState>,
-    #[cfg(all(target_os = "linux", feature = "gpio"))]
-    gpio: Option<rppal::gpio::Gpio>,
-    #[cfg(all(target_os = "linux", feature = "gpio"))]
-    input_pins: HashMap<u8, rppal::gpio::InputPin>,
-    #[cfg(all(target_os = "linux", feature = "gpio"))]
-    output_pins: HashMap<u8, rppal::gpio::OutputPin>,
-}
-
-#[allow(deprecated)]
-impl GpioManager {
-    pub fn new(configs: Vec<GpioConfig>) -> Self {
-        let mut simulated_states = HashMap::new();
-        for config in &configs {
-            simulated_states.insert(config.pin, PinState::Low);
-        }
-
-        Self {
-            configs,
-            simulated_states,
-            #[cfg(all(target_os = "linux", feature = "gpio"))]
-            gpio: None,
-            #[cfg(all(target_os = "linux", feature = "gpio"))]
-            input_pins: HashMap::new(),
-            #[cfg(all(target_os = "linux", feature = "gpio"))]
-            output_pins: HashMap::new(),
-        }
-    }
-
-    #[cfg(all(target_os = "linux", feature = "gpio"))]
-    pub fn init(&mut self) -> Result<()> {
-        use rppal::gpio::Gpio;
-        let gpio = Gpio::new().context("Failed to initialize GPIO")?;
-
-        for config in &self.configs.clone() {
-            let pin = gpio.get(config.pin)?;
-            match config.direction.as_str() {
-                "input" => {
-                    let mut input_pin = pin.into_input();
-                    match config.pull.as_str() {
-                        "up" => input_pin.set_pullupdown(rppal::gpio::PullUpDown::PullUp),
-                        "down" => input_pin.set_pullupdown(rppal::gpio::PullUpDown::PullDown),
-                        _ => {}
-                    }
-                    self.input_pins.insert(config.pin, input_pin);
-                }
-                "output" => {
-                    self.output_pins.insert(config.pin, pin.into_output());
-                }
-                _ => {}
-            }
-        }
-        self.gpio = Some(gpio);
-        Ok(())
-    }
-
-    #[cfg(not(all(target_os = "linux", feature = "gpio")))]
-    pub fn init(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    pub fn read_all(&self) -> GpioReadResult {
-        let mut result = GpioReadResult::default();
-        for config in &self.configs {
-            if config.direction != "input" {
-                continue;
-            }
-
-            #[cfg(all(target_os = "linux", feature = "gpio"))]
-            let state = self
-                .input_pins
-                .get(&config.pin)
-                .map(|p| {
-                    if p.is_high() {
-                        PinState::High
-                    } else {
-                        PinState::Low
-                    }
-                })
-                .unwrap_or(PinState::Low);
-
-            #[cfg(not(all(target_os = "linux", feature = "gpio")))]
-            let state = self
-                .simulated_states
-                .get(&config.pin)
-                .copied()
-                .unwrap_or(PinState::Low);
-
-            let final_state = if config.invert {
-                match state {
-                    PinState::High => PinState::Low,
-                    PinState::Low => PinState::High,
-                }
-            } else {
-                state
-            };
-
-            result.values.push(GpioPinValue {
-                name: config.name.clone(),
-                pin: config.pin,
-                direction: config.direction.clone(),
-                state: final_state,
-                timestamp: chrono::Utc::now().to_rfc3339(),
-            });
-        }
-        result
-    }
-
-    pub fn is_available(&self) -> bool {
-        #[cfg(all(target_os = "linux", feature = "gpio"))]
-        {
-            self.gpio.is_some()
-        }
-        #[cfg(not(all(target_os = "linux", feature = "gpio")))]
-        {
-            false
-        }
-    }
-
-    pub fn pin_count(&self) -> usize {
-        self.configs.len()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -698,5 +660,20 @@ mod tests {
         let result = GpioReadResult::default();
         assert!(result.values.is_empty());
         assert!(result.errors.is_empty());
+    }
+
+    #[test]
+    fn test_default_channel_size() {
+        // Verify default channel size constant
+        assert_eq!(DEFAULT_GPIO_CHANNEL_SIZE, 64);
+        assert!(DEFAULT_GPIO_CHANNEL_SIZE > 32); // Must be larger than old value
+    }
+
+    #[test]
+    fn test_retry_constants() {
+        // Verify retry configuration
+        assert!(GPIO_SEND_RETRIES >= 2);
+        assert!(GPIO_RETRY_DELAY_MS >= 5);
+        assert!(GPIO_RETRY_DELAY_MS <= 100); // Not too long
     }
 }

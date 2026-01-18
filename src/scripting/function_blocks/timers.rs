@@ -5,12 +5,42 @@
 //! - TOF: Off-Delay Timer (output stays ON for delay after input turns OFF)
 //! - TP: Pulse Timer (output stays ON for fixed duration after trigger)
 //!
-//! All timers use milliseconds for precision and are scan-cycle based.
+//! ## Timer Modes (v1.2.0)
+//! Timers support two timing modes:
+//! - **WallClock**: Uses actual elapsed time via `Instant::now()` (default)
+//! - **ScanCycle**: Counts scan cycles for deterministic PLC-style behavior
+//!
+//! Scan-cycle mode is useful for:
+//! - Deterministic behavior independent of actual execution time
+//! - Testing with predictable timing
+//! - PLC compatibility where cycle time is known and consistent
 
 use super::FunctionBlock;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::time::{Duration, Instant};
+
+// ============================================================================
+// Timer Mode (v1.2.0)
+// ============================================================================
+
+/// Timer timing mode (v1.2.0)
+///
+/// Determines how elapsed time is calculated:
+/// - WallClock: Real elapsed time using system clock
+/// - ScanCycle: Count scan cycles and convert using cycle time
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TimerMode {
+    /// Use actual elapsed time (default, original behavior)
+    #[default]
+    WallClock,
+    /// Count scan cycles (deterministic, PLC-style)
+    ScanCycle,
+}
+
+/// Default scan cycle time in milliseconds (10ms = 100Hz)
+const DEFAULT_CYCLE_TIME_MS: u64 = 10;
 
 // ============================================================================
 // TON - On-Delay Timer
@@ -21,6 +51,10 @@ use std::time::{Duration, Instant};
 /// When IN becomes TRUE, timer starts counting.
 /// After PT (preset time) elapses, Q becomes TRUE.
 /// When IN becomes FALSE, timer resets and Q becomes FALSE.
+///
+/// ## Timer Modes (v1.2.0)
+/// - WallClock: Uses `Instant::now()` for real elapsed time
+/// - ScanCycle: Counts execute() calls and multiplies by cycle time
 ///
 /// Timing Diagram:
 /// ```text
@@ -39,15 +73,29 @@ pub struct TON {
     input: bool,
     /// Output signal
     output: bool,
-    /// Timer start instant (not serialized)
+    /// Timer start instant (not serialized, WallClock mode)
     #[serde(skip)]
     start_instant: Option<Instant>,
     /// Previous input state for edge detection
     prev_input: bool,
+    /// Timer mode (v1.2.0)
+    #[serde(default)]
+    mode: TimerMode,
+    /// Scan cycle count (v1.2.0, ScanCycle mode)
+    #[serde(default)]
+    scan_count: u64,
+    /// Cycle time in milliseconds (v1.2.0, ScanCycle mode)
+    #[serde(default = "default_cycle_time")]
+    cycle_time_ms: u64,
+}
+
+/// Default cycle time for serde
+fn default_cycle_time() -> u64 {
+    DEFAULT_CYCLE_TIME_MS
 }
 
 impl TON {
-    /// Create new TON timer with preset time
+    /// Create new TON timer with preset time (WallClock mode)
     pub fn new(preset_ms: u64) -> Self {
         Self {
             pt_ms: preset_ms,
@@ -56,6 +104,28 @@ impl TON {
             output: false,
             start_instant: None,
             prev_input: false,
+            mode: TimerMode::WallClock,
+            scan_count: 0,
+            cycle_time_ms: DEFAULT_CYCLE_TIME_MS,
+        }
+    }
+
+    /// Create new TON timer with scan-cycle mode (v1.2.0)
+    ///
+    /// # Arguments
+    /// * `preset_ms` - Preset time in milliseconds
+    /// * `cycle_time_ms` - Expected scan cycle time in milliseconds
+    pub fn with_scan_cycle(preset_ms: u64, cycle_time_ms: u64) -> Self {
+        Self {
+            pt_ms: preset_ms,
+            et_ms: 0,
+            input: false,
+            output: false,
+            start_instant: None,
+            prev_input: false,
+            mode: TimerMode::ScanCycle,
+            scan_count: 0,
+            cycle_time_ms: cycle_time_ms.max(1), // Minimum 1ms
         }
     }
 
@@ -73,6 +143,21 @@ impl TON {
     pub fn q(&self) -> bool {
         self.output
     }
+
+    /// Get timer mode (v1.2.0)
+    pub fn mode(&self) -> TimerMode {
+        self.mode
+    }
+
+    /// Set timer mode (v1.2.0)
+    pub fn set_mode(&mut self, mode: TimerMode) {
+        self.mode = mode;
+    }
+
+    /// Set cycle time for scan-cycle mode (v1.2.0)
+    pub fn set_cycle_time(&mut self, ms: u64) {
+        self.cycle_time_ms = ms.max(1);
+    }
 }
 
 impl FunctionBlock for TON {
@@ -85,23 +170,39 @@ impl FunctionBlock for TON {
             // Input is ON
             if !self.prev_input {
                 // Rising edge - start timer
-                self.start_instant = Some(Instant::now());
+                match self.mode {
+                    TimerMode::WallClock => {
+                        self.start_instant = Some(Instant::now());
+                    }
+                    TimerMode::ScanCycle => {
+                        self.scan_count = 0;
+                    }
+                }
                 self.et_ms = 0;
             }
 
-            // Update elapsed time
-            if let Some(start) = self.start_instant {
-                self.et_ms = start.elapsed().as_millis() as u64;
-
-                // Check if preset time reached
-                if self.et_ms >= self.pt_ms {
-                    self.output = true;
-                    self.et_ms = self.pt_ms; // Cap at preset
+            // Update elapsed time based on mode
+            match self.mode {
+                TimerMode::WallClock => {
+                    if let Some(start) = self.start_instant {
+                        self.et_ms = start.elapsed().as_millis() as u64;
+                    }
                 }
+                TimerMode::ScanCycle => {
+                    self.scan_count += 1;
+                    self.et_ms = self.scan_count * self.cycle_time_ms;
+                }
+            }
+
+            // Check if preset time reached
+            if self.et_ms >= self.pt_ms {
+                self.output = true;
+                self.et_ms = self.pt_ms; // Cap at preset
             }
         } else {
             // Input is OFF - reset timer
             self.start_instant = None;
+            self.scan_count = 0;
             self.et_ms = 0;
             self.output = false;
         }
@@ -131,6 +232,28 @@ impl FunctionBlock for TON {
                     return true;
                 }
             }
+            // v1.2.0: Mode and cycle time inputs
+            "MODE" | "mode" => {
+                if let Some(s) = value.as_str() {
+                    match s {
+                        "wall_clock" | "wallclock" => {
+                            self.mode = TimerMode::WallClock;
+                            return true;
+                        }
+                        "scan_cycle" | "scancycle" => {
+                            self.mode = TimerMode::ScanCycle;
+                            return true;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            "CYCLE_TIME" | "cycle_time" => {
+                if let Some(v) = value.as_u64() {
+                    self.cycle_time_ms = v.max(1);
+                    return true;
+                }
+            }
             _ => {}
         }
         false
@@ -142,7 +265,10 @@ impl FunctionBlock for TON {
             "et_ms": self.et_ms,
             "input": self.input,
             "output": self.output,
-            "prev_input": self.prev_input
+            "prev_input": self.prev_input,
+            "mode": self.mode,
+            "scan_count": self.scan_count,
+            "cycle_time_ms": self.cycle_time_ms
         })
     }
 
@@ -163,8 +289,25 @@ impl FunctionBlock for TON {
             if let Some(prev) = obj.get("prev_input").and_then(|v| v.as_bool()) {
                 self.prev_input = prev;
             }
-            // Restore timer if was running
-            if self.input && self.et_ms > 0 && self.et_ms < self.pt_ms {
+            // v1.2.0: Restore mode and scan-cycle state
+            if let Some(mode_str) = obj.get("mode").and_then(|v| v.as_str()) {
+                self.mode = match mode_str {
+                    "scan_cycle" => TimerMode::ScanCycle,
+                    _ => TimerMode::WallClock,
+                };
+            }
+            if let Some(sc) = obj.get("scan_count").and_then(|v| v.as_u64()) {
+                self.scan_count = sc;
+            }
+            if let Some(ct) = obj.get("cycle_time_ms").and_then(|v| v.as_u64()) {
+                self.cycle_time_ms = ct.max(1);
+            }
+            // Restore timer if was running (WallClock mode only)
+            if self.mode == TimerMode::WallClock
+                && self.input
+                && self.et_ms > 0
+                && self.et_ms < self.pt_ms
+            {
                 // Approximate: assume just restored, set start to now - elapsed
                 self.start_instant = Some(Instant::now() - Duration::from_millis(self.et_ms));
             }
@@ -177,12 +320,13 @@ impl FunctionBlock for TON {
         self.et_ms = 0;
         self.output = false;
         self.start_instant = None;
+        self.scan_count = 0;
         self.input = false;
         self.prev_input = false;
     }
 
     fn input_names(&self) -> Vec<&'static str> {
-        vec!["IN", "PT"]
+        vec!["IN", "PT", "MODE", "CYCLE_TIME"]
     }
 
     fn output_names(&self) -> Vec<&'static str> {
@@ -705,12 +849,202 @@ mod tests {
         let mut ton: Box<dyn FunctionBlock> = Box::new(TON::new(100));
 
         assert_eq!(ton.fb_type(), "TON");
-        assert_eq!(ton.input_names(), vec!["IN", "PT"]);
+        assert_eq!(ton.input_names(), vec!["IN", "PT", "MODE", "CYCLE_TIME"]);
         assert_eq!(ton.output_names(), vec!["Q", "ET"]);
 
         ton.set_input("IN", Value::Bool(true));
         ton.execute();
 
         assert_eq!(ton.get_output("Q"), Some(Value::Bool(false)));
+    }
+
+    // ========================================================================
+    // Scan-Cycle Mode Tests (v1.2.0)
+    // ========================================================================
+
+    #[test]
+    fn test_ton_scan_cycle_basic() {
+        // 100ms preset, 10ms cycle time = 10 cycles to trigger
+        let mut ton = TON::with_scan_cycle(100, 10);
+
+        assert_eq!(ton.mode(), TimerMode::ScanCycle);
+        assert!(!ton.q());
+        assert_eq!(ton.elapsed(), 0);
+
+        // Turn on input
+        ton.set_input("IN", Value::Bool(true));
+
+        // Execute 9 cycles - should NOT trigger yet
+        for _ in 0..9 {
+            ton.execute();
+        }
+        assert!(!ton.q());
+        assert_eq!(ton.elapsed(), 90); // 9 * 10ms
+
+        // 10th cycle - should trigger
+        ton.execute();
+        assert!(ton.q());
+        assert_eq!(ton.elapsed(), 100); // Capped at preset
+    }
+
+    #[test]
+    fn test_ton_scan_cycle_deterministic() {
+        // Test that scan-cycle mode is completely deterministic
+        // (no dependency on actual elapsed time)
+        let mut ton1 = TON::with_scan_cycle(50, 5);
+        let mut ton2 = TON::with_scan_cycle(50, 5);
+
+        ton1.set_input("IN", Value::Bool(true));
+        ton2.set_input("IN", Value::Bool(true));
+
+        // Execute both the same number of times
+        for _ in 0..10 {
+            ton1.execute();
+            ton2.execute();
+        }
+
+        // Both should have identical state
+        assert_eq!(ton1.elapsed(), ton2.elapsed());
+        assert_eq!(ton1.q(), ton2.q());
+    }
+
+    #[test]
+    fn test_ton_scan_cycle_reset_on_input_off() {
+        let mut ton = TON::with_scan_cycle(100, 10);
+
+        // Start timer
+        ton.set_input("IN", Value::Bool(true));
+        for _ in 0..5 {
+            ton.execute();
+        }
+        assert_eq!(ton.elapsed(), 50);
+
+        // Turn off - should reset
+        ton.set_input("IN", Value::Bool(false));
+        ton.execute();
+
+        assert!(!ton.q());
+        assert_eq!(ton.elapsed(), 0);
+    }
+
+    #[test]
+    fn test_ton_mode_switch_via_input() {
+        let mut ton = TON::new(100);
+        assert_eq!(ton.mode(), TimerMode::WallClock);
+
+        // Switch to scan cycle mode
+        ton.set_input("MODE", Value::String("scan_cycle".to_string()));
+        assert_eq!(ton.mode(), TimerMode::ScanCycle);
+
+        // Switch back to wall clock
+        ton.set_input("MODE", Value::String("wall_clock".to_string()));
+        assert_eq!(ton.mode(), TimerMode::WallClock);
+
+        // Also test alternative names
+        ton.set_input("mode", Value::String("scancycle".to_string()));
+        assert_eq!(ton.mode(), TimerMode::ScanCycle);
+
+        ton.set_input("mode", Value::String("wallclock".to_string()));
+        assert_eq!(ton.mode(), TimerMode::WallClock);
+    }
+
+    #[test]
+    fn test_ton_cycle_time_setting() {
+        let mut ton = TON::with_scan_cycle(100, 10);
+
+        // Change cycle time via input
+        ton.set_input("CYCLE_TIME", Value::Number(20.into()));
+
+        ton.set_input("IN", Value::Bool(true));
+
+        // 5 cycles * 20ms = 100ms
+        for _ in 0..5 {
+            ton.execute();
+        }
+
+        assert!(ton.q());
+        assert_eq!(ton.elapsed(), 100);
+    }
+
+    #[test]
+    fn test_ton_cycle_time_minimum() {
+        let mut ton = TON::with_scan_cycle(100, 0); // 0 should become 1
+
+        ton.set_input("IN", Value::Bool(true));
+        ton.execute();
+
+        // Should use minimum of 1ms per cycle
+        assert_eq!(ton.elapsed(), 1);
+
+        // Also test via set_input
+        ton.set_input("CYCLE_TIME", Value::Number(0.into()));
+        ton.reset();
+        ton.set_input("IN", Value::Bool(true));
+        ton.execute();
+        assert_eq!(ton.elapsed(), 1);
+    }
+
+    #[test]
+    fn test_ton_scan_cycle_serialize_deserialize() {
+        let mut ton1 = TON::with_scan_cycle(200, 20);
+        ton1.set_input("IN", Value::Bool(true));
+
+        // Execute 5 cycles
+        for _ in 0..5 {
+            ton1.execute();
+        }
+
+        // Serialize
+        let state = ton1.serialize_state();
+
+        // Verify state contains scan-cycle fields
+        let obj = state.as_object().unwrap();
+        assert_eq!(obj.get("mode").and_then(|v| v.as_str()), Some("scan_cycle"));
+        assert_eq!(obj.get("scan_count").and_then(|v| v.as_u64()), Some(5));
+        assert_eq!(obj.get("cycle_time_ms").and_then(|v| v.as_u64()), Some(20));
+
+        // Deserialize into new timer
+        let mut ton2 = TON::new(0);
+        ton2.deserialize_state(&state);
+
+        assert_eq!(ton2.mode(), TimerMode::ScanCycle);
+        assert_eq!(ton2.preset(), 200);
+        assert_eq!(ton2.elapsed(), 100); // 5 * 20ms
+
+        // Continue execution - should complete after 5 more cycles
+        for _ in 0..5 {
+            ton2.execute();
+        }
+        assert!(ton2.q());
+    }
+
+    #[test]
+    fn test_ton_reset_clears_scan_count() {
+        let mut ton = TON::with_scan_cycle(100, 10);
+
+        ton.set_input("IN", Value::Bool(true));
+        for _ in 0..5 {
+            ton.execute();
+        }
+
+        ton.reset();
+
+        assert_eq!(ton.elapsed(), 0);
+        assert!(!ton.q());
+
+        // Start again - should count from 0
+        ton.set_input("IN", Value::Bool(true));
+        ton.execute();
+        assert_eq!(ton.elapsed(), 10); // First cycle
+    }
+
+    #[test]
+    fn test_timer_mode_default() {
+        // Default mode should be WallClock
+        assert_eq!(TimerMode::default(), TimerMode::WallClock);
+
+        // New timer should use WallClock
+        let ton = TON::new(100);
+        assert_eq!(ton.mode(), TimerMode::WallClock);
     }
 }

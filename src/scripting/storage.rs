@@ -5,6 +5,10 @@
 //! ## Memory Safety
 //! This module enforces a maximum script count to prevent unbounded memory growth.
 //! Scripts exceeding the limit will be rejected with an error.
+//!
+//! ## Thread Safety (v1.2.0)
+//! Uses `tokio::sync::RwLock` for concurrent access from multiple async tasks.
+//! All public methods are now async to support lock acquisition.
 
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Utc};
@@ -12,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use tokio::sync::RwLock;
 use tracing::{info, warn};
 
 use super::ScriptDefinition;
@@ -112,10 +117,15 @@ pub enum ScriptStatus {
     Running,
 }
 
-/// Script storage manager with bounded capacity
+/// Script storage manager with bounded capacity and thread-safe access
+///
+/// # Thread Safety (v1.2.0)
+/// Uses `tokio::sync::RwLock` to allow multiple readers or one writer.
+/// All mutating methods acquire a write lock; read-only methods acquire a read lock.
 pub struct ScriptStorage {
     scripts_dir: PathBuf,
-    scripts: HashMap<String, Script>,
+    /// Thread-safe script map protected by RwLock
+    scripts: RwLock<HashMap<String, Script>>,
     /// Maximum number of scripts allowed (memory protection)
     max_scripts: usize,
 }
@@ -131,7 +141,7 @@ impl ScriptStorage {
         let dir = scripts_dir.unwrap_or(DEFAULT_SCRIPTS_DIR);
         Self {
             scripts_dir: PathBuf::from(dir),
-            scripts: HashMap::with_capacity(max_scripts.min(100)),
+            scripts: RwLock::new(HashMap::with_capacity(max_scripts.min(100))),
             max_scripts,
         }
     }
@@ -141,13 +151,14 @@ impl ScriptStorage {
         self.max_scripts
     }
 
-    /// Check if storage is at capacity
-    pub fn is_full(&self) -> bool {
-        self.scripts.len() >= self.max_scripts
+    /// Check if storage is at capacity (async for lock acquisition)
+    pub async fn is_full(&self) -> bool {
+        let scripts = self.scripts.read().await;
+        scripts.len() >= self.max_scripts
     }
 
     /// Initialize storage and load existing scripts
-    pub fn init(&mut self) -> Result<()> {
+    pub async fn init(&self) -> Result<()> {
         // Create scripts directory if it doesn't exist
         if !self.scripts_dir.exists() {
             fs::create_dir_all(&self.scripts_dir).with_context(|| {
@@ -157,18 +168,21 @@ impl ScriptStorage {
         }
 
         // Load existing scripts
-        self.load_all()?;
+        self.load_all().await?;
 
-        info!(
-            "Script storage initialized with {} scripts",
-            self.scripts.len()
-        );
+        let count = {
+            let scripts = self.scripts.read().await;
+            scripts.len()
+        };
+
+        info!("Script storage initialized with {} scripts", count);
         Ok(())
     }
 
     /// Load all scripts from disk
-    pub fn load_all(&mut self) -> Result<()> {
-        self.scripts.clear();
+    pub async fn load_all(&self) -> Result<()> {
+        let mut scripts = self.scripts.write().await;
+        scripts.clear();
 
         let entries = fs::read_dir(&self.scripts_dir)
             .with_context(|| format!("Failed to read scripts directory: {:?}", self.scripts_dir))?;
@@ -188,7 +202,7 @@ impl ScriptStorage {
                             "Loaded script: {} ({})",
                             script.definition.name, script.definition.id
                         );
-                        self.scripts.insert(script.definition.id.clone(), script);
+                        scripts.insert(script.definition.id.clone(), script);
                     }
                     Err(e) => {
                         warn!("Failed to load script from {:?}: {}", path, e);
@@ -234,16 +248,21 @@ impl ScriptStorage {
     /// # Memory Safety
     /// Returns an error if the storage is at capacity and the script is new.
     /// Updates to existing scripts are always allowed.
-    pub fn save(&mut self, script: Script) -> Result<()> {
+    ///
+    /// # Thread Safety
+    /// Acquires a write lock on the scripts map.
+    pub async fn save(&self, script: Script) -> Result<()> {
         // Validate script ID to prevent path traversal
         validate_script_id(&script.definition.id)?;
 
+        let mut scripts = self.scripts.write().await;
+
         // Check capacity for new scripts (updates always allowed)
-        let is_new = !self.scripts.contains_key(&script.definition.id);
-        if is_new && self.is_full() {
+        let is_new = !scripts.contains_key(&script.definition.id);
+        if is_new && scripts.len() >= self.max_scripts {
             return Err(anyhow!(
                 "Script storage at capacity ({}/{}). Delete existing scripts first.",
-                self.scripts.len(),
+                scripts.len(),
                 self.max_scripts
             ));
         }
@@ -259,12 +278,12 @@ impl ScriptStorage {
 
         info!("Saved script: {} to {:?}", script.definition.id, path);
 
-        self.scripts.insert(script.definition.id.clone(), script);
+        scripts.insert(script.definition.id.clone(), script);
         Ok(())
     }
 
     /// Add or update a script from definition
-    pub fn add_script(&mut self, definition: ScriptDefinition) -> Result<()> {
+    pub async fn add_script(&self, definition: ScriptDefinition) -> Result<()> {
         let script = Script {
             status: if definition.enabled {
                 ScriptStatus::Active
@@ -279,40 +298,25 @@ impl ScriptStorage {
             definition,
         };
 
-        self.save(script)
+        self.save(script).await
     }
 
-    /// Get a script by ID
-    pub fn get(&self, id: &str) -> Option<&Script> {
-        self.scripts.get(id)
+    /// Get a script by ID (returns cloned copy for thread safety)
+    pub async fn get(&self, id: &str) -> Option<Script> {
+        let scripts = self.scripts.read().await;
+        scripts.get(id).cloned()
     }
 
-    /// Get a mutable script by ID
-    pub fn get_mut(&mut self, id: &str) -> Option<&mut Script> {
-        self.scripts.get_mut(id)
+    /// Get all scripts (returns cloned copies for thread safety)
+    pub async fn get_all(&self) -> Vec<Script> {
+        let scripts = self.scripts.read().await;
+        scripts.values().cloned().collect()
     }
 
-    /// Get all scripts
-    pub fn get_all(&self) -> Vec<&Script> {
-        self.scripts.values().collect()
-    }
-
-    /// Get all scripts as cloned copies (v2.2: for thread-safe access)
-    pub fn get_all_cloned(&self) -> Vec<Script> {
-        self.scripts.values().cloned().collect()
-    }
-
-    /// Get active scripts only (returns references, use within lock scope)
-    pub fn get_active_refs(&self) -> Vec<&Script> {
-        self.scripts
-            .values()
-            .filter(|s| s.status == ScriptStatus::Active && s.definition.enabled)
-            .collect()
-    }
-
-    /// Get active scripts as cloned copies (v2.2: for thread-safe access)
-    pub fn get_active(&self) -> Vec<Script> {
-        self.scripts
+    /// Get active scripts (returns cloned copies for thread safety)
+    pub async fn get_active(&self) -> Vec<Script> {
+        let scripts = self.scripts.read().await;
+        scripts
             .values()
             .filter(|s| s.status == ScriptStatus::Active && s.definition.enabled)
             .cloned()
@@ -320,11 +324,13 @@ impl ScriptStorage {
     }
 
     /// Delete a script
-    pub fn delete(&mut self, id: &str) -> Result<bool> {
+    pub async fn delete(&self, id: &str) -> Result<bool> {
         // Validate script ID to prevent path traversal
         validate_script_id(id)?;
 
-        if self.scripts.remove(id).is_some() {
+        let mut scripts = self.scripts.write().await;
+
+        if scripts.remove(id).is_some() {
             // Delete file
             let filename = format!("{}.json", id);
             let path = self.scripts_dir.join(&filename);
@@ -342,11 +348,13 @@ impl ScriptStorage {
     }
 
     /// Enable a script
-    pub fn enable(&mut self, id: &str) -> Result<bool> {
+    pub async fn enable(&self, id: &str) -> Result<bool> {
         // Validate script ID to prevent path traversal
         validate_script_id(id)?;
 
-        if let Some(script) = self.scripts.get_mut(id) {
+        let mut scripts = self.scripts.write().await;
+
+        if let Some(script) = scripts.get_mut(id) {
             script.definition.enabled = true;
             script.status = ScriptStatus::Active;
             script.updated_at = Utc::now();
@@ -367,11 +375,13 @@ impl ScriptStorage {
     }
 
     /// Disable a script
-    pub fn disable(&mut self, id: &str) -> Result<bool> {
+    pub async fn disable(&self, id: &str) -> Result<bool> {
         // Validate script ID to prevent path traversal
         validate_script_id(id)?;
 
-        if let Some(script) = self.scripts.get_mut(id) {
+        let mut scripts = self.scripts.write().await;
+
+        if let Some(script) = scripts.get_mut(id) {
             script.definition.enabled = false;
             script.status = ScriptStatus::Paused;
             script.updated_at = Utc::now();
@@ -392,8 +402,10 @@ impl ScriptStorage {
     }
 
     /// Update script execution result
-    pub fn update_result(&mut self, id: &str, success: bool, result: &str) {
-        if let Some(script) = self.scripts.get_mut(id) {
+    pub async fn update_result(&self, id: &str, success: bool, result: &str) {
+        let mut scripts = self.scripts.write().await;
+
+        if let Some(script) = scripts.get_mut(id) {
             script.last_run = Some(Utc::now());
             script.last_result = Some(result.to_string());
 
@@ -417,9 +429,21 @@ impl ScriptStorage {
         }
     }
 
+    /// Set script status to Running
+    pub async fn set_running(&self, id: &str) -> bool {
+        let mut scripts = self.scripts.write().await;
+        if let Some(script) = scripts.get_mut(id) {
+            script.status = ScriptStatus::Running;
+            true
+        } else {
+            false
+        }
+    }
+
     /// Get script count
-    pub fn count(&self) -> usize {
-        self.scripts.len()
+    pub async fn count(&self) -> usize {
+        let scripts = self.scripts.read().await;
+        scripts.len()
     }
 }
 

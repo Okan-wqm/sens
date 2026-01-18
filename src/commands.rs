@@ -191,10 +191,12 @@ impl Default for ProgramState {
 /// Command handler
 ///
 /// v2.2: Uses shared ScriptStorage from AppState for data consistency
+/// v1.2.0: ScriptStorage now has internal RwLock (no external lock needed)
 pub struct CommandHandler {
     state: Arc<RwLock<AppState>>,
     /// Shared script storage (v2.2 - from AppState singleton)
-    script_storage: Arc<tokio::sync::RwLock<ScriptStorage>>,
+    /// v1.2.0: Internal RwLock for thread-safe access
+    script_storage: Arc<ScriptStorage>,
     rate_limiter: RateLimiter,
     /// Path to program state file
     program_state_path: PathBuf,
@@ -869,13 +871,13 @@ impl CommandHandler {
 
     // === Script Commands ===
 
-    /// List all scripts (v2.2 - uses shared storage)
+    /// List all scripts (v2.2 - uses shared storage, v1.2.0 - async API)
     async fn cmd_list_scripts(&self) -> (bool, Value, Option<String>) {
         info!("Executing list_scripts command");
 
-        let storage = self.script_storage.read().await;
-        let scripts: Vec<Value> = storage
-            .get_all()
+        // v1.2.0: Use async get_all() with internal locking
+        let all_scripts = self.script_storage.get_all().await;
+        let scripts: Vec<Value> = all_scripts
             .iter()
             .map(|s| {
                 json!({
@@ -900,7 +902,7 @@ impl CommandHandler {
         )
     }
 
-    /// Get a specific script
+    /// Get a specific script (v1.2.0 - async API)
     async fn cmd_get_script(&self, params: &Value) -> (bool, Value, Option<String>) {
         let script_id = match params.get("id").and_then(|v| v.as_str()) {
             Some(id) => id,
@@ -915,8 +917,8 @@ impl CommandHandler {
 
         info!("Executing get_script command for: {}", script_id);
 
-        let storage = self.script_storage.read().await;
-        match storage.get(script_id) {
+        // v1.2.0: Use async get() with internal locking
+        match self.script_storage.get(script_id).await {
             Some(script) => {
                 let data = json!({
                     "id": script.definition.id,
@@ -945,7 +947,7 @@ impl CommandHandler {
         }
     }
 
-    /// Deploy (add/update) a script
+    /// Deploy (add/update) a script (v1.2.0 - async API)
     async fn cmd_deploy_script(&mut self, params: &Value) -> (bool, Value, Option<String>) {
         info!("Executing deploy_script command");
 
@@ -964,8 +966,8 @@ impl CommandHandler {
         let script_id = definition.id.clone();
         let script_name = definition.name.clone();
 
-        let mut storage = self.script_storage.write().await;
-        match storage.add_script(definition) {
+        // v1.2.0: Use async add_script() with internal locking
+        match self.script_storage.add_script(definition).await {
             Ok(()) => {
                 info!("Script deployed: {} ({})", script_name, script_id);
                 (
@@ -985,7 +987,7 @@ impl CommandHandler {
         }
     }
 
-    /// Delete a script
+    /// Delete a script (v1.2.0 - async API)
     async fn cmd_delete_script(&mut self, params: &Value) -> (bool, Value, Option<String>) {
         let script_id = match params.get("id").and_then(|v| v.as_str()) {
             Some(id) => id,
@@ -1000,8 +1002,8 @@ impl CommandHandler {
 
         info!("Executing delete_script command for: {}", script_id);
 
-        let mut storage = self.script_storage.write().await;
-        match storage.delete(script_id) {
+        // v1.2.0: Use async delete() with internal locking
+        match self.script_storage.delete(script_id).await {
             Ok(true) => (true, json!({"id": script_id, "deleted": true}), None),
             Ok(false) => (
                 false,
@@ -1012,7 +1014,7 @@ impl CommandHandler {
         }
     }
 
-    /// Enable a script
+    /// Enable a script (v1.2.0 - async API)
     async fn cmd_enable_script(&mut self, params: &Value) -> (bool, Value, Option<String>) {
         let script_id = match params.get("id").and_then(|v| v.as_str()) {
             Some(id) => id,
@@ -1027,8 +1029,8 @@ impl CommandHandler {
 
         info!("Executing enable_script command for: {}", script_id);
 
-        let mut storage = self.script_storage.write().await;
-        match storage.enable(script_id) {
+        // v1.2.0: Use async enable() with internal locking
+        match self.script_storage.enable(script_id).await {
             Ok(true) => (true, json!({"id": script_id, "enabled": true}), None),
             Ok(false) => (
                 false,
@@ -1039,7 +1041,7 @@ impl CommandHandler {
         }
     }
 
-    /// Disable a script
+    /// Disable a script (v1.2.0 - async API)
     async fn cmd_disable_script(&mut self, params: &Value) -> (bool, Value, Option<String>) {
         let script_id = match params.get("id").and_then(|v| v.as_str()) {
             Some(id) => id,
@@ -1054,8 +1056,8 @@ impl CommandHandler {
 
         info!("Executing disable_script command for: {}", script_id);
 
-        let mut storage = self.script_storage.write().await;
-        match storage.disable(script_id) {
+        // v1.2.0: Use async disable() with internal locking
+        match self.script_storage.disable(script_id).await {
             Ok(true) => (true, json!({"id": script_id, "enabled": false}), None),
             Ok(false) => (
                 false,
@@ -1135,17 +1137,14 @@ impl CommandHandler {
             }
         }
 
-        // Deploy script portion (v2.2 - uses shared storage)
-        {
-            let mut storage = self.script_storage.write().await;
-            if let Err(e) = storage.add_script(program.script.clone()) {
-                error!("Failed to deploy script: {}", e);
-                return (
-                    false,
-                    json!(null),
-                    Some(format!("Failed to deploy script: {}", e)),
-                );
-            }
+        // Deploy script portion (v2.2 - uses shared storage, v1.2.0 - async API)
+        if let Err(e) = self.script_storage.add_script(program.script.clone()).await {
+            error!("Failed to deploy script: {}", e);
+            return (
+                false,
+                json!(null),
+                Some(format!("Failed to deploy script: {}", e)),
+            );
         }
 
         // Update state
@@ -1246,13 +1245,14 @@ impl CommandHandler {
         let prev_name = previous.name.clone();
         let prev_version = previous.version;
 
-        // Deploy previous version's script (v2.2 - uses shared storage)
+        // Deploy previous version's script (v2.2 - uses shared storage, v1.2.0 - async API)
+        if let Err(e) = self
+            .script_storage
+            .add_script(previous.script.clone())
+            .await
         {
-            let mut storage = self.script_storage.write().await;
-            if let Err(e) = storage.add_script(previous.script.clone()) {
-                error!("Rollback failed - script deployment error: {}", e);
-                return (false, json!(null), Some(format!("Rollback failed: {}", e)));
-            }
+            error!("Rollback failed - script deployment error: {}", e);
+            return (false, json!(null), Some(format!("Rollback failed: {}", e)));
         }
 
         // Update state

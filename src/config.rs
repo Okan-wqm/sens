@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 /// Default config file path
 const DEFAULT_CONFIG_PATH: &str = "/etc/suderra/config.yaml";
@@ -57,6 +57,14 @@ pub struct AgentConfig {
     /// Runtime/resilience configuration
     #[serde(default)]
     pub runtime: RuntimeConfig,
+
+    /// Cache configuration (v1.2.0)
+    #[serde(default)]
+    pub cache: CacheConfig,
+
+    /// Circuit breaker configuration (v1.2.0)
+    #[serde(default)]
+    pub circuit_breaker: CircuitBreakerConfig,
 }
 
 /// MQTT TLS configuration (IEC 62443 SL2 FR4: Data Confidentiality)
@@ -275,6 +283,70 @@ pub struct LoggingConfig {
     pub file: String,
 }
 
+/// Cache configuration for Moka (v1.2.0)
+///
+/// Used for caching sensor readings, computed values, and script outputs
+/// to reduce latency and prevent excessive recomputation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CacheConfig {
+    /// Maximum number of entries in the cache
+    #[serde(default = "default_cache_max_capacity")]
+    pub max_capacity: u64,
+
+    /// Time-to-live for cache entries in seconds (0 = no TTL)
+    #[serde(default = "default_cache_ttl_secs")]
+    pub ttl_secs: u64,
+
+    /// Time-to-idle for cache entries in seconds (0 = no TTI)
+    /// Entry expires if not accessed within this time
+    #[serde(default = "default_cache_tti_secs")]
+    pub tti_secs: u64,
+}
+
+impl Default for CacheConfig {
+    fn default() -> Self {
+        Self {
+            max_capacity: default_cache_max_capacity(),
+            ttl_secs: default_cache_ttl_secs(),
+            tti_secs: default_cache_tti_secs(),
+        }
+    }
+}
+
+/// Circuit breaker configuration (v1.2.0)
+///
+/// Controls fault isolation behavior for external service calls
+/// (Modbus devices, MQTT, APIs).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CircuitBreakerConfig {
+    /// Number of failures before opening the circuit
+    #[serde(default = "default_cb_failure_threshold")]
+    pub failure_threshold: u32,
+
+    /// Number of successes in half-open state to close the circuit
+    #[serde(default = "default_cb_success_threshold")]
+    pub success_threshold: u32,
+
+    /// Time in seconds to wait before attempting recovery (half-open)
+    #[serde(default = "default_circuit_breaker_recovery_secs")]
+    pub recovery_secs: u64,
+
+    /// Maximum concurrent requests allowed in half-open state
+    #[serde(default = "default_cb_half_open_permits")]
+    pub half_open_permits: u32,
+}
+
+impl Default for CircuitBreakerConfig {
+    fn default() -> Self {
+        Self {
+            failure_threshold: default_cb_failure_threshold(),
+            success_threshold: default_cb_success_threshold(),
+            recovery_secs: default_circuit_breaker_recovery_secs(),
+            half_open_permits: default_cb_half_open_permits(),
+        }
+    }
+}
+
 /// Scripting configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScriptingConfig {
@@ -438,6 +510,34 @@ impl Default for ModbusSecurityConfig {
     }
 }
 
+/// Modbus TLS configuration (v1.2.0 - IEC 62443 SL2 FR4: Data Confidentiality)
+///
+/// Enables encrypted Modbus/TCP communication using TLS.
+/// Supports both server authentication and mutual TLS (mTLS).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ModbusTlsConfig {
+    /// Enable TLS encryption for Modbus TCP
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Server name for SNI (Server Name Indication)
+    /// Required when connecting to TLS-enabled Modbus servers
+    pub server_name: Option<String>,
+
+    /// CA certificate path for server verification
+    pub ca_cert_path: Option<String>,
+
+    /// Client certificate path (for mutual TLS / mTLS)
+    pub client_cert_path: Option<String>,
+
+    /// Client private key path (for mutual TLS / mTLS)
+    pub client_key_path: Option<String>,
+
+    /// Skip server certificate verification (NOT recommended for production)
+    #[serde(default)]
+    pub insecure_skip_verify: bool,
+}
+
 /// Modbus device configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModbusDeviceConfig {
@@ -464,6 +564,10 @@ pub struct ModbusDeviceConfig {
     /// Security configuration (optional, uses global defaults if not specified)
     #[serde(default)]
     pub security: ModbusSecurityConfig,
+
+    /// TLS configuration for encrypted Modbus TCP (v1.2.0)
+    #[serde(default)]
+    pub tls: ModbusTlsConfig,
 }
 
 /// Byte order for multi-register values
@@ -600,6 +704,28 @@ fn default_modbus_burst_capacity() -> u64 {
 }
 fn default_max_register_count() -> u16 {
     125 // Modbus protocol max is 125 for holding/input registers
+}
+
+// Cache defaults (v1.2.0)
+fn default_cache_max_capacity() -> u64 {
+    1000
+}
+fn default_cache_ttl_secs() -> u64 {
+    3600 // 1 hour
+}
+fn default_cache_tti_secs() -> u64 {
+    1800 // 30 minutes
+}
+
+// Circuit breaker defaults (v1.2.0)
+fn default_cb_failure_threshold() -> u32 {
+    3
+}
+fn default_cb_success_threshold() -> u32 {
+    2
+}
+fn default_cb_half_open_permits() -> u32 {
+    1
 }
 
 // Scripting defaults
@@ -782,6 +908,69 @@ impl AgentConfig {
             if device.address.trim().is_empty() {
                 anyhow::bail!("Modbus device '{}' has empty address", device.name);
             }
+
+            // Validate Modbus TLS configuration (v1.2.0 - IEC 62443 SL2 FR4)
+            if device.tls.enabled {
+                // TLS only supported for TCP connections
+                if device.connection_type.to_lowercase() != "tcp" {
+                    anyhow::bail!(
+                        "Modbus device '{}': TLS is only supported for TCP connections",
+                        device.name
+                    );
+                }
+
+                // Server name required for TLS
+                if device.tls.server_name.is_none() && !device.tls.insecure_skip_verify {
+                    anyhow::bail!(
+                        "Modbus device '{}': server_name required for TLS (or set insecure_skip_verify)",
+                        device.name
+                    );
+                }
+
+                // Validate certificate paths if provided
+                if let Some(ref ca_path) = device.tls.ca_cert_path {
+                    if !std::path::Path::new(ca_path).exists() {
+                        anyhow::bail!(
+                            "Modbus device '{}': CA certificate not found: {}",
+                            device.name,
+                            ca_path
+                        );
+                    }
+                }
+                if let Some(ref cert_path) = device.tls.client_cert_path {
+                    if !std::path::Path::new(cert_path).exists() {
+                        anyhow::bail!(
+                            "Modbus device '{}': client certificate not found: {}",
+                            device.name,
+                            cert_path
+                        );
+                    }
+                }
+                if let Some(ref key_path) = device.tls.client_key_path {
+                    if !std::path::Path::new(key_path).exists() {
+                        anyhow::bail!(
+                            "Modbus device '{}': client key not found: {}",
+                            device.name,
+                            key_path
+                        );
+                    }
+                }
+                // Validate mTLS consistency
+                if device.tls.client_cert_path.is_some() != device.tls.client_key_path.is_some() {
+                    anyhow::bail!(
+                        "Modbus device '{}': mTLS requires both client_cert_path and client_key_path",
+                        device.name
+                    );
+                }
+
+                // Warn about insecure configuration
+                if device.tls.insecure_skip_verify {
+                    warn!(
+                        "Modbus device '{}': TLS verification disabled - NOT recommended for production",
+                        device.name
+                    );
+                }
+            }
         }
 
         // Validate telemetry interval (minimum 5 seconds, maximum 1 hour)
@@ -796,6 +985,35 @@ impl AgentConfig {
                 "Telemetry interval {} is too high: maximum is 3600 seconds (1 hour)",
                 self.telemetry.interval_seconds
             );
+        }
+
+        // Validate MQTT TLS certificate paths exist (IEC 62443 SL2 FR4)
+        // v1.2.0: Fail-fast if TLS is enabled but certificates are missing
+        if self.mqtt.tls.enabled {
+            if let Some(ref ca_path) = self.mqtt.tls.ca_cert_path {
+                if !std::path::Path::new(ca_path).exists() {
+                    anyhow::bail!("MQTT CA certificate not found: {}", ca_path);
+                }
+            } else {
+                // No custom CA - system CA store will be used
+                warn!("MQTT TLS enabled without custom CA certificate - using system CA store");
+            }
+            if let Some(ref cert_path) = self.mqtt.tls.client_cert_path {
+                if !std::path::Path::new(cert_path).exists() {
+                    anyhow::bail!("MQTT client certificate not found: {}", cert_path);
+                }
+            }
+            if let Some(ref key_path) = self.mqtt.tls.client_key_path {
+                if !std::path::Path::new(key_path).exists() {
+                    anyhow::bail!("MQTT client key not found: {}", key_path);
+                }
+            }
+            // Validate mTLS consistency - if one is set, both must be set
+            if self.mqtt.tls.client_cert_path.is_some() != self.mqtt.tls.client_key_path.is_some() {
+                anyhow::bail!(
+                    "MQTT mTLS requires both client_cert_path and client_key_path to be set"
+                );
+            }
         }
 
         debug!("Configuration validation passed");
@@ -866,5 +1084,158 @@ mod tests {
             resolved.commands,
             "tenants/tenant-123/devices/device-456/commands"
         );
+    }
+
+    // ========================================================================
+    // Cache Config Tests (v1.2.0)
+    // ========================================================================
+
+    #[test]
+    fn test_cache_config_defaults() {
+        let config = CacheConfig::default();
+
+        assert_eq!(config.max_capacity, 1000);
+        assert_eq!(config.ttl_secs, 3600); // 1 hour
+        assert_eq!(config.tti_secs, 1800); // 30 minutes
+    }
+
+    #[test]
+    fn test_cache_config_serialization() {
+        let config = CacheConfig {
+            max_capacity: 5000,
+            ttl_secs: 7200,
+            tti_secs: 3600,
+        };
+
+        let yaml = serde_yaml::to_string(&config).unwrap();
+        assert!(yaml.contains("max_capacity: 5000"));
+        assert!(yaml.contains("ttl_secs: 7200"));
+        assert!(yaml.contains("tti_secs: 3600"));
+
+        // Deserialize back
+        let parsed: CacheConfig = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(parsed.max_capacity, 5000);
+        assert_eq!(parsed.ttl_secs, 7200);
+        assert_eq!(parsed.tti_secs, 3600);
+    }
+
+    // ========================================================================
+    // Circuit Breaker Config Tests (v1.2.0)
+    // ========================================================================
+
+    #[test]
+    fn test_circuit_breaker_config_defaults() {
+        let config = CircuitBreakerConfig::default();
+
+        assert_eq!(config.failure_threshold, 3);
+        assert_eq!(config.success_threshold, 2);
+        assert_eq!(config.recovery_secs, 30);
+        assert_eq!(config.half_open_permits, 1);
+    }
+
+    #[test]
+    fn test_circuit_breaker_config_serialization() {
+        let config = CircuitBreakerConfig {
+            failure_threshold: 5,
+            success_threshold: 3,
+            recovery_secs: 60,
+            half_open_permits: 2,
+        };
+
+        let yaml = serde_yaml::to_string(&config).unwrap();
+        assert!(yaml.contains("failure_threshold: 5"));
+        assert!(yaml.contains("success_threshold: 3"));
+        assert!(yaml.contains("recovery_secs: 60"));
+        assert!(yaml.contains("half_open_permits: 2"));
+
+        // Deserialize back
+        let parsed: CircuitBreakerConfig = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(parsed.failure_threshold, 5);
+        assert_eq!(parsed.success_threshold, 3);
+        assert_eq!(parsed.recovery_secs, 60);
+        assert_eq!(parsed.half_open_permits, 2);
+    }
+
+    #[test]
+    fn test_circuit_breaker_config_partial_yaml() {
+        // Test that missing fields use defaults
+        let yaml = "failure_threshold: 10\n";
+        let config: CircuitBreakerConfig = serde_yaml::from_str(yaml).unwrap();
+
+        assert_eq!(config.failure_threshold, 10);
+        assert_eq!(config.success_threshold, 2); // default
+        assert_eq!(config.recovery_secs, 30); // default
+        assert_eq!(config.half_open_permits, 1); // default
+    }
+
+    // ========================================================================
+    // Modbus TLS Config Tests (v1.2.0)
+    // ========================================================================
+
+    #[test]
+    fn test_modbus_tls_config_defaults() {
+        let config = ModbusTlsConfig::default();
+
+        assert!(!config.enabled);
+        assert!(config.server_name.is_none());
+        assert!(config.ca_cert_path.is_none());
+        assert!(config.client_cert_path.is_none());
+        assert!(config.client_key_path.is_none());
+        assert!(!config.insecure_skip_verify);
+    }
+
+    #[test]
+    fn test_modbus_tls_config_serialization() {
+        let config = ModbusTlsConfig {
+            enabled: true,
+            server_name: Some("plc.example.com".to_string()),
+            ca_cert_path: Some("/etc/certs/ca.pem".to_string()),
+            client_cert_path: Some("/etc/certs/client.pem".to_string()),
+            client_key_path: Some("/etc/certs/client.key".to_string()),
+            insecure_skip_verify: false,
+        };
+
+        let yaml = serde_yaml::to_string(&config).unwrap();
+        assert!(yaml.contains("enabled: true"));
+        assert!(yaml.contains("server_name: plc.example.com"));
+        assert!(yaml.contains("ca_cert_path:"));
+
+        // Deserialize back
+        let parsed: ModbusTlsConfig = serde_yaml::from_str(&yaml).unwrap();
+        assert!(parsed.enabled);
+        assert_eq!(parsed.server_name, Some("plc.example.com".to_string()));
+    }
+
+    #[test]
+    fn test_modbus_device_config_with_tls() {
+        let yaml = r#"
+name: "PLC-001"
+connection_type: "tcp"
+address: "192.168.1.100:502"
+slave_id: 1
+tls:
+  enabled: true
+  server_name: "plc.local"
+  insecure_skip_verify: true
+"#;
+
+        let config: ModbusDeviceConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.name, "PLC-001");
+        assert!(config.tls.enabled);
+        assert_eq!(config.tls.server_name, Some("plc.local".to_string()));
+        assert!(config.tls.insecure_skip_verify);
+    }
+
+    #[test]
+    fn test_modbus_device_config_without_tls() {
+        let yaml = r#"
+name: "PLC-002"
+connection_type: "tcp"
+address: "192.168.1.101:502"
+"#;
+
+        let config: ModbusDeviceConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.name, "PLC-002");
+        assert!(!config.tls.enabled); // Default: TLS disabled
     }
 }
