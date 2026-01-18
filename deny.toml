@@ -45,12 +45,31 @@ allow = [
     "Unicode-DFS-2016",
     "Unlicense",
     "MPL-2.0",  # Weak copyleft, file-level
+    "LicenseRef-Proprietary",  # Our own proprietary code
 ]
 
 # Exceptions for crates with complex license situations
 exceptions = [
     # ring uses a custom license combining ISC, MIT, and OpenSSL
     { allow = ["ISC", "MIT", "OpenSSL"], crate = "ring" },
+]
+
+# Private crates that use non-SPDX licenses
+private = { ignore = true }
+
+# Skip checking our own crate's license (it's proprietary)
+[[licenses.clarify]]
+crate = "suderra-agent"
+expression = "LicenseRef-Proprietary"
+license-files = []
+
+# rodbus is licensed under BSD-3-Clause but manifest doesn't specify
+# See: https://github.com/stepfunc/rodbus/blob/main/LICENSE.txt
+[[licenses.clarify]]
+crate = "rodbus"
+expression = "BSD-3-Clause"
+license-files = [
+    { path = "LICENSE.txt", hash = 0x3754c5f8 }
 ]
 
 [bans]
