@@ -353,7 +353,10 @@ impl CommandHandler {
                 (
                     false,
                     json!(null),
-                    Some(format!("Unknown command: {}", sanitize_for_log(&command.command))),
+                    Some(format!(
+                        "Unknown command: {}",
+                        sanitize_for_log(&command.command)
+                    )),
                 )
             }
         };
@@ -922,7 +925,10 @@ impl CommandHandler {
         };
 
         // v1.2.2: Sanitize script ID for logging
-        info!("Executing get_script command for: {}", sanitize_for_log(script_id));
+        info!(
+            "Executing get_script command for: {}",
+            sanitize_for_log(script_id)
+        );
 
         // v1.2.0: Use async get() with internal locking
         match self.script_storage.get(script_id).await {
@@ -949,7 +955,10 @@ impl CommandHandler {
             None => (
                 false,
                 json!(null),
-                Some(format!("Script '{}' not found", sanitize_for_log(script_id))),
+                Some(format!(
+                    "Script '{}' not found",
+                    sanitize_for_log(script_id)
+                )),
             ),
         }
     }
@@ -1008,7 +1017,10 @@ impl CommandHandler {
         };
 
         // v1.2.2: Sanitize script ID for logging
-        info!("Executing delete_script command for: {}", sanitize_for_log(script_id));
+        info!(
+            "Executing delete_script command for: {}",
+            sanitize_for_log(script_id)
+        );
 
         // v1.2.0: Use async delete() with internal locking
         match self.script_storage.delete(script_id).await {
@@ -1016,7 +1028,10 @@ impl CommandHandler {
             Ok(false) => (
                 false,
                 json!(null),
-                Some(format!("Script '{}' not found", sanitize_for_log(script_id))),
+                Some(format!(
+                    "Script '{}' not found",
+                    sanitize_for_log(script_id)
+                )),
             ),
             Err(e) => (false, json!(null), Some(format!("Delete failed: {}", e))),
         }
@@ -1036,7 +1051,10 @@ impl CommandHandler {
         };
 
         // v1.2.2: Sanitize script ID for logging
-        info!("Executing enable_script command for: {}", sanitize_for_log(script_id));
+        info!(
+            "Executing enable_script command for: {}",
+            sanitize_for_log(script_id)
+        );
 
         // v1.2.0: Use async enable() with internal locking
         match self.script_storage.enable(script_id).await {
@@ -1044,7 +1062,10 @@ impl CommandHandler {
             Ok(false) => (
                 false,
                 json!(null),
-                Some(format!("Script '{}' not found", sanitize_for_log(script_id))),
+                Some(format!(
+                    "Script '{}' not found",
+                    sanitize_for_log(script_id)
+                )),
             ),
             Err(e) => (false, json!(null), Some(format!("Enable failed: {}", e))),
         }
@@ -1064,7 +1085,10 @@ impl CommandHandler {
         };
 
         // v1.2.2: Sanitize script ID for logging
-        info!("Executing disable_script command for: {}", sanitize_for_log(script_id));
+        info!(
+            "Executing disable_script command for: {}",
+            sanitize_for_log(script_id)
+        );
 
         // v1.2.0: Use async disable() with internal locking
         match self.script_storage.disable(script_id).await {
@@ -1072,7 +1096,10 @@ impl CommandHandler {
             Ok(false) => (
                 false,
                 json!(null),
-                Some(format!("Script '{}' not found", sanitize_for_log(script_id))),
+                Some(format!(
+                    "Script '{}' not found",
+                    sanitize_for_log(script_id)
+                )),
             ),
             Err(e) => (false, json!(null), Some(format!("Disable failed: {}", e))),
         }
