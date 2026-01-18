@@ -5,7 +5,7 @@
 //!
 //! v2.2: Optimized regex compilation with lazy static initialization
 
-use chrono::{Datelike, Timelike, Utc};
+use chrono::{Datelike, FixedOffset, TimeZone, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -24,7 +24,7 @@ fn get_interpolation_regex() -> &'static regex::Regex {
 }
 
 /// Script execution context - provides data for condition evaluation
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ScriptContext {
     /// Sensor/register values (name -> value)
     pub sensors: HashMap<String, f64>,
@@ -40,6 +40,24 @@ pub struct ScriptContext {
 
     /// Current timestamp
     pub timestamp: i64,
+
+    /// Timezone offset in seconds from UTC (v1.2.1 - issue #22)
+    /// Positive = east of UTC, negative = west of UTC
+    /// E.g., +3600 = UTC+1, -18000 = UTC-5
+    pub timezone_offset_secs: i32,
+}
+
+impl Default for ScriptContext {
+    fn default() -> Self {
+        Self {
+            sensors: HashMap::new(),
+            gpio: HashMap::new(),
+            variables: HashMap::new(),
+            system: SystemContext::default(),
+            timestamp: Utc::now().timestamp(),
+            timezone_offset_secs: 0, // Default: UTC
+        }
+    }
 }
 
 /// System context for scripts
@@ -53,15 +71,27 @@ pub struct SystemContext {
 }
 
 impl ScriptContext {
-    /// Create a new context
+    /// Create a new context with UTC timezone (default)
     pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create a new context with specified timezone offset (v1.2.1 - issue #22)
+    ///
+    /// # Arguments
+    /// * `offset_secs` - Timezone offset in seconds from UTC
+    ///   - Positive values = east of UTC (e.g., +3600 = UTC+1)
+    ///   - Negative values = west of UTC (e.g., -18000 = UTC-5)
+    pub fn with_timezone(offset_secs: i32) -> Self {
         Self {
-            sensors: HashMap::new(),
-            gpio: HashMap::new(),
-            variables: HashMap::new(),
-            system: SystemContext::default(),
-            timestamp: Utc::now().timestamp(),
+            timezone_offset_secs: offset_secs,
+            ..Self::default()
         }
+    }
+
+    /// Set timezone offset (v1.2.1 - issue #22)
+    pub fn set_timezone(&mut self, offset_secs: i32) {
+        self.timezone_offset_secs = offset_secs;
     }
 
     /// Update timestamp to current time
@@ -119,16 +149,26 @@ impl ScriptContext {
                     .map(|v| Value::from(*v)),
                 "var" | "variable" => self.variables.get(source_name).cloned(),
                 "time" => {
-                    let now = Utc::now();
+                    // v1.2.1: Apply timezone offset for local time calculations
+                    let utc_now = Utc::now();
+                    let local_time = if self.timezone_offset_secs != 0 {
+                        let offset = FixedOffset::east_opt(self.timezone_offset_secs)
+                            .unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+                        offset.from_utc_datetime(&utc_now.naive_utc())
+                    } else {
+                        FixedOffset::east_opt(0).unwrap().from_utc_datetime(&utc_now.naive_utc())
+                    };
                     match source_name {
-                        "hour" => Some(Value::from(now.hour())),
-                        "minute" => Some(Value::from(now.minute())),
-                        "second" => Some(Value::from(now.second())),
-                        "day" => Some(Value::from(now.day())),
-                        "month" => Some(Value::from(now.month())),
-                        "year" => Some(Value::from(now.year())),
-                        "weekday" => Some(Value::from(now.weekday().num_days_from_monday())),
-                        "timestamp" => Some(Value::from(now.timestamp())),
+                        "hour" => Some(Value::from(local_time.hour())),
+                        "minute" => Some(Value::from(local_time.minute())),
+                        "second" => Some(Value::from(local_time.second())),
+                        "day" => Some(Value::from(local_time.day())),
+                        "month" => Some(Value::from(local_time.month())),
+                        "year" => Some(Value::from(local_time.year())),
+                        "weekday" => Some(Value::from(local_time.weekday().num_days_from_monday())),
+                        "timestamp" => Some(Value::from(utc_now.timestamp())), // Always UTC
+                        "offset" => Some(Value::from(self.timezone_offset_secs)), // v1.2.1
+                        "utc_hour" => Some(Value::from(utc_now.hour())), // v1.2.1: explicit UTC
                         _ => None,
                     }
                 }

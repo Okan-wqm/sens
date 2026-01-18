@@ -1,6 +1,13 @@
-# Suderra Edge Agent v1.2.0
+# Suderra Edge Agent v1.2.1
 
 Industrial IoT Edge Agent for aquaculture monitoring and control systems. Built with Rust for reliability, safety, and performance on resource-constrained edge devices.
+
+## What's New in v1.2.1
+
+- **Timezone Support**: Scripts can now use local time with configurable timezone offset
+- **Script Versioning**: Automatic revision tracking with single-step rollback support
+- **CLI Arguments**: `--init` to generate default config, `--version`, `--help`
+- **Counter Overflow Safety**: All long-running counters use `wrapping_add`
 
 ## What's New in v1.2.0
 

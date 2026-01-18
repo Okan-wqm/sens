@@ -64,9 +64,12 @@ pub struct ScanCycleStats {
 
 impl ScanCycleStats {
     /// Update stats after a scan cycle
+    ///
+    /// # Safety
+    /// Uses wrapping_add to prevent counter overflow (v1.2.1 - issue #27)
     fn update(&mut self, cycle_duration: Duration, target_cycle_ms: u64) {
         let cycle_ms = cycle_duration.as_millis() as u64;
-        self.total_cycles += 1;
+        self.total_cycles = self.total_cycles.wrapping_add(1);
         self.current_cycle_ms = cycle_ms;
 
         if cycle_ms > self.max_cycle_ms {
@@ -79,7 +82,7 @@ impl ScanCycleStats {
 
         // Detect overrun
         if cycle_ms > target_cycle_ms {
-            self.overrun_count += 1;
+            self.overrun_count = self.overrun_count.wrapping_add(1);
             self.last_overrun_ms = cycle_ms - target_cycle_ms;
             warn!(
                 cycle_ms = cycle_ms,

@@ -1,6 +1,6 @@
 [package]
 name = "suderra-agent"
-version = "1.0.0"
+version = "1.2.1"
 edition = "2021"
 authors = ["Suderra <info@suderra.com>"]
 description = "Suderra Edge Agent for Industrial IoT"

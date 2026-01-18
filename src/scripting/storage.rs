@@ -101,6 +101,43 @@ pub struct Script {
 
     /// Updated timestamp
     pub updated_at: DateTime<Utc>,
+
+    /// Revision number (v1.2.1 - issue #28: version tracking)
+    /// Increments on each update to the script definition
+    #[serde(default)]
+    pub revision: u32,
+
+    /// Previous definition (v1.2.1 - simple rollback support)
+    /// Stores the last version for potential rollback
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub previous_definition: Option<Box<ScriptDefinition>>,
+}
+
+impl Script {
+    /// Get the current revision number
+    pub fn revision(&self) -> u32 {
+        self.revision
+    }
+
+    /// Check if rollback is possible
+    pub fn can_rollback(&self) -> bool {
+        self.previous_definition.is_some()
+    }
+
+    /// Rollback to previous version (v1.2.1)
+    /// Returns true if rollback was successful
+    pub fn rollback(&mut self) -> bool {
+        if let Some(prev) = self.previous_definition.take() {
+            // Store current as previous for potential re-rollback
+            self.previous_definition = Some(Box::new(self.definition.clone()));
+            self.definition = *prev;
+            self.revision = self.revision.wrapping_add(1);
+            self.updated_at = Utc::now();
+            true
+        } else {
+            false
+        }
+    }
 }
 
 /// Script status
@@ -239,6 +276,8 @@ impl ScriptStorage {
             error_count: 0,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            revision: 1,
+            previous_definition: None,
             definition,
         })
     }
@@ -283,19 +322,44 @@ impl ScriptStorage {
     }
 
     /// Add or update a script from definition
+    ///
+    /// # Versioning (v1.2.1 - issue #28)
+    /// If updating an existing script, stores the previous version and increments revision.
     pub async fn add_script(&self, definition: ScriptDefinition) -> Result<()> {
-        let script = Script {
-            status: if definition.enabled {
+        let scripts = self.scripts.read().await;
+        let existing = scripts.get(&definition.id).cloned();
+        drop(scripts);
+
+        let script = if let Some(mut old_script) = existing {
+            // Update existing script - store previous version (v1.2.1)
+            old_script.previous_definition = Some(Box::new(old_script.definition.clone()));
+            old_script.definition = definition;
+            old_script.revision = old_script.revision.wrapping_add(1);
+            old_script.updated_at = Utc::now();
+            old_script.status = if old_script.definition.enabled {
                 ScriptStatus::Active
             } else {
                 ScriptStatus::Paused
-            },
-            last_run: None,
-            last_result: None,
-            error_count: 0,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-            definition,
+            };
+            old_script.error_count = 0; // Reset on update
+            old_script
+        } else {
+            // New script
+            Script {
+                status: if definition.enabled {
+                    ScriptStatus::Active
+                } else {
+                    ScriptStatus::Paused
+                },
+                last_run: None,
+                last_result: None,
+                error_count: 0,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                revision: 1, // v1.2.1: start at revision 1
+                previous_definition: None,
+                definition,
+            }
         };
 
         self.save(script).await
@@ -396,6 +460,35 @@ impl ScriptStorage {
 
             info!("Disabled script: {}", id);
             Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Rollback a script to its previous version (v1.2.1 - issue #28)
+    ///
+    /// Returns true if rollback was successful, false if no previous version exists.
+    pub async fn rollback_script(&self, id: &str) -> Result<bool> {
+        validate_script_id(id)?;
+
+        let mut scripts = self.scripts.write().await;
+
+        if let Some(script) = scripts.get_mut(id) {
+            if script.rollback() {
+                // Save to disk
+                let definition = script.definition.clone();
+                let filename = format!("{}.json", id);
+                let path = self.scripts_dir.join(&filename);
+
+                let content = serde_json::to_string_pretty(&definition)?;
+                fs::write(&path, content)?;
+
+                info!("Rolled back script: {} to revision {}", id, script.revision);
+                Ok(true)
+            } else {
+                warn!("No previous version available for script: {}", id);
+                Ok(false)
+            }
         } else {
             Ok(false)
         }
