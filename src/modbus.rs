@@ -767,7 +767,7 @@ impl ModbusClient {
 
         let channel = self
             .channel
-            .as_ref()
+            .as_mut()
             .ok_or_else(|| anyhow::anyhow!("Not connected"))?;
 
         // Create request parameters with unit ID and timeout
@@ -858,7 +858,7 @@ impl ModbusClient {
 
         let channel = self
             .channel
-            .as_ref()
+            .as_mut()
             .ok_or_else(|| anyhow::anyhow!("Not connected"))?;
 
         // Create request parameters with unit ID and timeout
@@ -889,7 +889,7 @@ impl ModbusClient {
 
         let channel = self
             .channel
-            .as_ref()
+            .as_mut()
             .ok_or_else(|| anyhow::anyhow!("Not connected"))?;
 
         // Create request parameters with unit ID and timeout

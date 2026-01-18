@@ -32,6 +32,7 @@ pub use engine::ScriptEngine;
 pub use fb_registry::{FBDefinition, FBParams, FBRegistry, FBRegistryError};
 pub use limits::{ExecutionContext, LimitError, ScriptLimits, ScriptRateLimiter};
 pub use persistence::{PersistenceError, SqlitePersistence, VariableScope, VariableStore};
+#[allow(unused_imports)] // ScriptStatus is part of public API for external consumers
 pub use storage::{Script, ScriptStatus, ScriptStorage};
 pub use triggers::{Trigger, TriggerManager, TriggerType};
 
