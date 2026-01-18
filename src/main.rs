@@ -268,7 +268,8 @@ fn main() {
     // Handle CLI arguments (v1.2.1)
     let args: Vec<String> = std::env::args().collect();
 
-    for arg in &args[1..] {
+    // Process first argument only (simple CLI - no loop needed)
+    if let Some(arg) = args.get(1) {
         match arg.as_str() {
             "--init" => {
                 if let Err(e) = generate_default_config() {
