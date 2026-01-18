@@ -581,12 +581,20 @@ impl GpioActor {
     #[cfg(all(target_os = "linux", feature = "gpio"))]
     fn write_single_pin(&mut self, pin: u8, value: bool) -> Result<()> {
         if let Some(output_pin) = self.output_pins.get_mut(&pin) {
-            if value {
+            // Apply invert logic to write path (v2.1.1 - issue #26 fix)
+            let config = self.configs.iter().find(|c| c.pin == pin);
+            let actual_value = if config.map(|c| c.invert).unwrap_or(false) {
+                !value
+            } else {
+                value
+            };
+
+            if actual_value {
                 output_pin.set_high();
             } else {
                 output_pin.set_low();
             }
-            debug!("Set GPIO pin {} to {}", pin, value);
+            debug!("Set GPIO pin {} to {} (invert={:?})", pin, value, config.map(|c| c.invert));
             Ok(())
         } else {
             Err(anyhow::anyhow!("Pin {} not configured as output", pin))
@@ -595,14 +603,16 @@ impl GpioActor {
 
     #[cfg(not(all(target_os = "linux", feature = "gpio")))]
     fn write_single_pin(&mut self, pin: u8, value: bool) -> Result<()> {
-        if self
+        if let Some(config) = self
             .configs
             .iter()
-            .any(|c| c.pin == pin && c.direction == "output")
+            .find(|c| c.pin == pin && c.direction == "output")
         {
-            let state = if value { PinState::High } else { PinState::Low };
+            // Apply invert logic to write path (v2.1.1 - issue #26 fix)
+            let actual_value = if config.invert { !value } else { value };
+            let state = if actual_value { PinState::High } else { PinState::Low };
             self.simulated_states.insert(pin, state);
-            debug!("Simulated GPIO pin {} set to {:?}", pin, state);
+            debug!("Simulated GPIO pin {} set to {:?} (invert={})", pin, state, config.invert);
             Ok(())
         } else {
             Err(anyhow::anyhow!("Pin {} not configured as output", pin))

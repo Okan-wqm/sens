@@ -19,7 +19,7 @@ mod engine;
 mod fb_registry;
 pub mod function_blocks;
 mod limits;
-mod parallel;
+pub mod parallel;
 mod persistence;
 mod storage;
 mod triggers;
