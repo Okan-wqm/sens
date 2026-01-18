@@ -255,12 +255,20 @@ impl TriggerManager {
                 .any(|p| p.trim().parse::<u32>().map(|v| v == value).unwrap_or(false));
         }
 
-        // Handle range (N-M)
+        // Handle range (N-M) with wrap-around support (v2.1.1 - issue #15 fix)
+        // Normal range: 5-10 matches 5, 6, 7, 8, 9, 10
+        // Wrap-around range: 22-6 matches 22, 23, 0, 1, 2, 3, 4, 5, 6 (for night hours)
         if pattern.contains('-') {
             let parts: Vec<&str> = pattern.split('-').collect();
             if parts.len() == 2 {
                 if let (Ok(start), Ok(end)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
-                    return value >= start && value <= end;
+                    return if start <= end {
+                        // Normal range: 5-10
+                        value >= start && value <= end
+                    } else {
+                        // Wrap-around range: 22-6 (for night schedules)
+                        value >= start || value <= end
+                    };
                 }
             }
         }
@@ -436,9 +444,17 @@ mod tests {
         assert!(TriggerManager::match_cron_field_static("*/5", 15));
         assert!(!TriggerManager::match_cron_field_static("*/5", 7));
 
-        // Range
+        // Normal range
         assert!(TriggerManager::match_cron_field_static("5-10", 7));
         assert!(!TriggerManager::match_cron_field_static("5-10", 3));
+
+        // Wrap-around range (v2.1.1 - night hours like 22-6)
+        assert!(TriggerManager::match_cron_field_static("22-6", 23)); // 23 is in 22-6
+        assert!(TriggerManager::match_cron_field_static("22-6", 0));  // 0 is in 22-6
+        assert!(TriggerManager::match_cron_field_static("22-6", 3));  // 3 is in 22-6
+        assert!(TriggerManager::match_cron_field_static("22-6", 6));  // 6 is in 22-6
+        assert!(!TriggerManager::match_cron_field_static("22-6", 12)); // 12 is NOT in 22-6
+        assert!(!TriggerManager::match_cron_field_static("22-6", 10)); // 10 is NOT in 22-6
 
         // List
         assert!(TriggerManager::match_cron_field_static("1,5,10", 5));

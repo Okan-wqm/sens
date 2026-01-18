@@ -1,6 +1,17 @@
-# Suderra Edge Agent v1.0.0
+# Suderra Edge Agent v1.2.0
 
 Industrial IoT Edge Agent for aquaculture monitoring and control systems. Built with Rust for reliability, safety, and performance on resource-constrained edge devices.
+
+## What's New in v1.2.0
+
+- **Modbus TLS/mTLS Support**: Encrypted Modbus TCP with rodbus (IEC 62443 SL2 FR4)
+- **Parallel Modbus Reads**: Concurrent device polling with `read_all_parallel()`
+- **Circuit Breaker Half-Open Permits**: Limited concurrent requests during recovery
+- **Cron Wrap-Around Ranges**: Night schedules like `22-6` now work correctly
+- **Offline Queue Disk Limits**: Configurable max disk usage (default: 50MB)
+- **GPIO Invert Consistency**: Invert flag now applied on both read and write
+- **Thread-Safe Script Storage**: `tokio::sync::RwLock` for concurrent access
+- **Systemd Watchdog**: Automatic heartbeat for service health monitoring
 
 ## Table of Contents
 
