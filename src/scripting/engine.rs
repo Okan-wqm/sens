@@ -1045,7 +1045,9 @@ impl ScriptEngine {
         };
 
         // Update script result (ScriptStorage has internal RwLock)
-        self.storage.update_result(script_id, success, &result_msg).await;
+        self.storage
+            .update_result(script_id, success, &result_msg)
+            .await;
 
         // v2.2: Restore previous script context after execution completes
         // This ensures parent script's context is restored after nested calls

@@ -498,79 +498,86 @@ impl ModbusClient {
             Duration::from_secs(30), // Max retry delay
         );
 
-        let channel = if self.config.tls.enabled {
-            // TLS connection (IEC 62443 SL2 FR4)
-            info!(
-                "Connecting to Modbus TCP/TLS device '{}' at {} (TLS enabled)",
-                self.config.name, socket_addr
-            );
+        let channel =
+            if self.config.tls.enabled {
+                // TLS connection (IEC 62443 SL2 FR4)
+                info!(
+                    "Connecting to Modbus TCP/TLS device '{}' at {} (TLS enabled)",
+                    self.config.name, socket_addr
+                );
 
-            // Get certificate paths
-            let ca_cert_path = self.config.tls.ca_cert_path.as_ref()
-                .ok_or_else(|| anyhow::anyhow!("TLS enabled but ca_cert_path not specified"))?;
-            let ca_path = std::path::Path::new(ca_cert_path);
+                // Get certificate paths
+                let ca_cert_path =
+                    self.config.tls.ca_cert_path.as_ref().ok_or_else(|| {
+                        anyhow::anyhow!("TLS enabled but ca_cert_path not specified")
+                    })?;
+                let ca_path = std::path::Path::new(ca_cert_path);
 
-            // Server name for SNI (use server_name or extract from address)
-            let server_name = self.config.tls.server_name.clone()
-                .unwrap_or_else(|| socket_addr.ip().to_string());
+                // Server name for SNI (use server_name or extract from address)
+                let server_name = self
+                    .config
+                    .tls
+                    .server_name
+                    .clone()
+                    .unwrap_or_else(|| socket_addr.ip().to_string());
 
-            // Use rodbus 1.4 TLS API: full_pki() for PKI hierarchy or self_signed()
-            // full_pki() validates against CA certificate and optionally checks server name
-            let tls_config = if let (Some(cert_path), Some(key_path)) = (
-                self.config.tls.client_cert_path.as_ref(),
-                self.config.tls.client_key_path.as_ref(),
-            ) {
-                // mTLS with client certificate
-                let client_cert_path = std::path::Path::new(cert_path);
-                let client_key_path = std::path::Path::new(key_path);
+                // Use rodbus 1.4 TLS API: full_pki() for PKI hierarchy or self_signed()
+                // full_pki() validates against CA certificate and optionally checks server name
+                let tls_config = if let (Some(cert_path), Some(key_path)) = (
+                    self.config.tls.client_cert_path.as_ref(),
+                    self.config.tls.client_key_path.as_ref(),
+                ) {
+                    // mTLS with client certificate
+                    let client_cert_path = std::path::Path::new(cert_path);
+                    let client_key_path = std::path::Path::new(key_path);
 
-                rodbus::client::TlsClientConfig::full_pki(
-                    Some(server_name.clone()),    // Server name for SNI validation (Option<String>)
-                    ca_path,                       // CA certificate path
-                    client_cert_path,              // Client certificate path
-                    client_key_path,               // Client private key path
-                    None,                          // Private key password (None = unencrypted)
-                    rodbus::client::MinTlsVersion::V1_2,  // Minimum TLS version
+                    rodbus::client::TlsClientConfig::full_pki(
+                        Some(server_name.clone()), // Server name for SNI validation (Option<String>)
+                        ca_path,                   // CA certificate path
+                        client_cert_path,          // Client certificate path
+                        client_key_path,           // Client private key path
+                        None,                      // Private key password (None = unencrypted)
+                        rodbus::client::MinTlsVersion::V1_2, // Minimum TLS version
+                    )
+                    .with_context(|| "Failed to create TLS config with client cert")?
+                } else {
+                    // Server-only TLS (no client cert) - use self_signed for simpler config
+                    // Note: full_pki without client cert requires empty paths which isn't ideal
+                    // For server-only auth, we use self_signed with the CA cert as the expected cert
+                    rodbus::client::TlsClientConfig::full_pki(
+                        Some(server_name.clone()), // Server name for SNI validation (Option<String>)
+                        ca_path,                   // CA certificate path
+                        std::path::Path::new(""),  // Empty client cert path
+                        std::path::Path::new(""),  // Empty client key path
+                        None,                      // No password
+                        rodbus::client::MinTlsVersion::V1_2,
+                    )
+                    .with_context(|| "Failed to create TLS config (server auth only)")?
+                };
+
+                rodbus::client::spawn_tls_client_task(
+                    host_addr,
+                    1, // max queued requests
+                    retry,
+                    tls_config,
+                    DecodeLevel::default(),
+                    None, // listener
                 )
-                .with_context(|| "Failed to create TLS config with client cert")?
             } else {
-                // Server-only TLS (no client cert) - use self_signed for simpler config
-                // Note: full_pki without client cert requires empty paths which isn't ideal
-                // For server-only auth, we use self_signed with the CA cert as the expected cert
-                rodbus::client::TlsClientConfig::full_pki(
-                    Some(server_name.clone()),    // Server name for SNI validation (Option<String>)
-                    ca_path,                       // CA certificate path
-                    std::path::Path::new(""),      // Empty client cert path
-                    std::path::Path::new(""),      // Empty client key path
-                    None,                          // No password
-                    rodbus::client::MinTlsVersion::V1_2,
+                // Plain TCP connection (backwards compatible)
+                info!(
+                    "Connecting to Modbus TCP device '{}' at {}",
+                    self.config.name, socket_addr
+                );
+
+                rodbus::client::spawn_tcp_client_task(
+                    host_addr,
+                    1, // max queued requests
+                    retry,
+                    DecodeLevel::default(),
+                    None, // listener
                 )
-                .with_context(|| "Failed to create TLS config (server auth only)")?
             };
-
-            rodbus::client::spawn_tls_client_task(
-                host_addr,
-                1, // max queued requests
-                retry,
-                tls_config,
-                DecodeLevel::default(),
-                None, // listener
-            )
-        } else {
-            // Plain TCP connection (backwards compatible)
-            info!(
-                "Connecting to Modbus TCP device '{}' at {}",
-                self.config.name, socket_addr
-            );
-
-            rodbus::client::spawn_tcp_client_task(
-                host_addr,
-                1, // max queued requests
-                retry,
-                DecodeLevel::default(),
-                None, // listener
-            )
-        };
 
         self.channel = Some(channel);
 
@@ -609,7 +616,7 @@ impl ModbusClient {
             // Create serial port settings using rodbus 1.4 API
             let path = &self.config.address;
             let serial_settings = rodbus::SerialSettings {
-                baud_rate,                       // u32 directly
+                baud_rate, // u32 directly
                 data_bits: rodbus::DataBits::Eight,
                 stop_bits: rodbus::StopBits::One,
                 parity: rodbus::Parity::None,
@@ -1282,7 +1289,10 @@ mod tests {
         });
 
         assert!(client.config.tls.enabled);
-        assert_eq!(client.config.tls.server_name, Some("plc.example.com".to_string()));
+        assert_eq!(
+            client.config.tls.server_name,
+            Some("plc.example.com".to_string())
+        );
         assert!(!client.is_connected()); // Not connected yet
     }
 

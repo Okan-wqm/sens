@@ -401,8 +401,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::super::ActionType; // Only used in tests
     use super::*;
-    use super::super::ActionType;  // Only used in tests
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
