@@ -11,6 +11,7 @@
 use anyhow::{Context, Result};
 use chrono::Utc;
 use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS, Transport};
+use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -184,7 +185,8 @@ impl MqttClient {
             config.mqtt.port,
         );
 
-        options.set_credentials(username, password);
+        // v1.2.2: Use expose_secret() to access password (zeroize on drop)
+        options.set_credentials(username, password.expose_secret());
         options.set_keep_alive(Duration::from_secs(config.mqtt.keepalive_secs));
         options.set_clean_session(config.mqtt.clean_session);
 

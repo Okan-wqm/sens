@@ -621,7 +621,7 @@ async fn run_agent(
                 state_guard.config.mqtt.broker = Some(response.mqtt_broker);
                 state_guard.config.mqtt.port = response.mqtt_port;
                 state_guard.config.mqtt.username = Some(response.mqtt_username);
-                state_guard.config.mqtt.password = Some(response.mqtt_password);
+                state_guard.config.mqtt.password = Some(secrecy::Secret::new(response.mqtt_password));
                 state_guard.tenant_id = Some(response.tenant_id.clone());
                 state_guard.is_activated = true;
 
