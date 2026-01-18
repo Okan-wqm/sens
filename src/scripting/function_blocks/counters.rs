@@ -6,10 +6,17 @@
 //! - CTUD: Up/Down Counter (bidirectional)
 //!
 //! All counters are edge-triggered (count on rising edge only).
+//!
+//! ## Overflow Protection (v1.2.2)
+//! All counters are protected against overflow/underflow:
+//! - CTU: Stops at i32::MAX with warning
+//! - CTD: Stops at i32::MIN with warning
+//! - CTUD: Stops at respective limits with warning
 
 use super::FunctionBlock;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use tracing::warn;
 
 // ============================================================================
 // CTU - Up Counter
@@ -84,6 +91,13 @@ impl FunctionBlock for CTU {
             // Rising edge on CU - count up
             if self.cv < i32::MAX {
                 self.cv += 1;
+            } else {
+                // v1.2.2: Overflow detection with warning
+                warn!(
+                    "CTU overflow: counter at maximum value {} (PV={})",
+                    i32::MAX,
+                    self.pv
+                );
             }
         }
 
@@ -251,6 +265,13 @@ impl FunctionBlock for CTD {
             // Rising edge on CD - count down
             if self.cv > i32::MIN {
                 self.cv -= 1;
+            } else {
+                // v1.2.2: Underflow detection with warning
+                warn!(
+                    "CTD underflow: counter at minimum value {} (PV={})",
+                    i32::MIN,
+                    self.pv
+                );
             }
         }
 
@@ -438,12 +459,30 @@ impl FunctionBlock for CTUD {
             self.cv = self.pv;
         } else {
             // Count up on rising edge of CU
-            if self.cu && !self.prev_cu && self.cv < i32::MAX {
-                self.cv += 1;
+            if self.cu && !self.prev_cu {
+                if self.cv < i32::MAX {
+                    self.cv += 1;
+                } else {
+                    // v1.2.2: Overflow detection with warning
+                    warn!(
+                        "CTUD overflow: counter at maximum value {} (PV={})",
+                        i32::MAX,
+                        self.pv
+                    );
+                }
             }
             // Count down on rising edge of CD
-            if self.cd && !self.prev_cd && self.cv > i32::MIN {
-                self.cv -= 1;
+            if self.cd && !self.prev_cd {
+                if self.cv > i32::MIN {
+                    self.cv -= 1;
+                } else {
+                    // v1.2.2: Underflow detection with warning
+                    warn!(
+                        "CTUD underflow: counter at minimum value {} (PV={})",
+                        i32::MIN,
+                        self.pv
+                    );
+                }
             }
         }
 

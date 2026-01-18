@@ -577,6 +577,79 @@ impl OfflineQueue {
         conn.query_row("SELECT COUNT(*) FROM message_queue", [], |row| row.get(0))
             .unwrap_or(0)
     }
+
+    /// Vacuum the database to reclaim disk space (v1.2.2)
+    ///
+    /// SQLite doesn't automatically reclaim space from deleted rows.
+    /// This method should be called periodically (e.g., after batch acks)
+    /// or when disk usage is high.
+    ///
+    /// # Returns
+    /// * `Ok((before, after))` - Bytes before and after VACUUM
+    /// * `Err` if VACUUM fails
+    pub fn vacuum(&self) -> Result<(u64, u64)> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        let before = self.get_db_size(&conn);
+
+        conn.execute("VACUUM", [])
+            .context("Failed to VACUUM database")?;
+
+        let after = self.get_db_size(&conn);
+
+        if before > after {
+            info!(
+                "VACUUM reclaimed {} bytes ({} -> {} bytes)",
+                before - after,
+                before,
+                after
+            );
+        } else {
+            debug!("VACUUM completed (no space reclaimed)");
+        }
+
+        Ok((before, after))
+    }
+
+    /// Vacuum if disk usage exceeds threshold (v1.2.2)
+    ///
+    /// Only runs VACUUM if:
+    /// 1. Database size exceeds 80% of max_disk_bytes
+    /// 2. There have been significant deletes (freelist pages > 10%)
+    ///
+    /// # Returns
+    /// * `Some((before, after))` if VACUUM was run
+    /// * `None` if VACUUM was skipped
+    pub fn vacuum_if_needed(&self) -> Result<Option<(u64, u64)>> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        // Skip if no disk limit set
+        if self.max_disk_bytes == 0 {
+            return Ok(None);
+        }
+
+        let db_size = self.get_db_size(&conn);
+        let threshold = (self.max_disk_bytes as f64 * 0.8) as u64;
+
+        // Check freelist pages (space available for reuse)
+        let freelist_count: i64 = conn
+            .query_row("PRAGMA freelist_count", [], |row| row.get(0))
+            .unwrap_or(0);
+        let page_count: i64 = conn
+            .query_row("PRAGMA page_count", [], |row| row.get(0))
+            .unwrap_or(1);
+
+        let freelist_ratio = freelist_count as f64 / page_count as f64;
+
+        // VACUUM if usage > 80% OR freelist > 10% of pages
+        if db_size > threshold || freelist_ratio > 0.10 {
+            drop(conn); // Release lock before vacuum
+            let result = self.vacuum()?;
+            return Ok(Some(result));
+        }
+
+        Ok(None)
+    }
 }
 
 #[cfg(test)]

@@ -5,6 +5,9 @@
 //!
 //! v2.1 Features:
 //! - deploy_program: IEC 61131-3 program deployment with FBs
+//!
+//! v1.2.2 Security:
+//! - Log sanitization to prevent log injection attacks
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -19,6 +22,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::mqtt::{CommandMessage, CommandResponse, IncomingMessage};
 use crate::scripting::{ExecutionMode, FBDefinition, ScriptDefinition, ScriptStorage};
+use crate::security::sanitize_for_log;
 use crate::AppState;
 
 /// Simple sliding window rate limiter
@@ -344,11 +348,12 @@ impl CommandHandler {
             "restart_agent" => self.cmd_restart_agent().await,
             "set_log_level" => self.cmd_set_log_level(&command.params).await,
             _ => {
-                warn!("Unknown command: {}", command.command);
+                // v1.2.2: Sanitize user-provided command name to prevent log injection
+                warn!("Unknown command: {}", sanitize_for_log(&command.command));
                 (
                     false,
                     json!(null),
-                    Some(format!("Unknown command: {}", command.command)),
+                    Some(format!("Unknown command: {}", sanitize_for_log(&command.command))),
                 )
             }
         };
@@ -528,7 +533,8 @@ impl CommandHandler {
             );
         }
 
-        info!("Setting log level to: {}", level);
+        // v1.2.2: Sanitize for logging (even though whitelist validated)
+        info!("Setting log level to: {}", sanitize_for_log(level));
 
         // Update config
         let mut state = self.state.write().await;
@@ -915,7 +921,8 @@ impl CommandHandler {
             }
         };
 
-        info!("Executing get_script command for: {}", script_id);
+        // v1.2.2: Sanitize script ID for logging
+        info!("Executing get_script command for: {}", sanitize_for_log(script_id));
 
         // v1.2.0: Use async get() with internal locking
         match self.script_storage.get(script_id).await {
@@ -942,7 +949,7 @@ impl CommandHandler {
             None => (
                 false,
                 json!(null),
-                Some(format!("Script '{}' not found", script_id)),
+                Some(format!("Script '{}' not found", sanitize_for_log(script_id))),
             ),
         }
     }
@@ -1000,7 +1007,8 @@ impl CommandHandler {
             }
         };
 
-        info!("Executing delete_script command for: {}", script_id);
+        // v1.2.2: Sanitize script ID for logging
+        info!("Executing delete_script command for: {}", sanitize_for_log(script_id));
 
         // v1.2.0: Use async delete() with internal locking
         match self.script_storage.delete(script_id).await {
@@ -1008,7 +1016,7 @@ impl CommandHandler {
             Ok(false) => (
                 false,
                 json!(null),
-                Some(format!("Script '{}' not found", script_id)),
+                Some(format!("Script '{}' not found", sanitize_for_log(script_id))),
             ),
             Err(e) => (false, json!(null), Some(format!("Delete failed: {}", e))),
         }
@@ -1027,7 +1035,8 @@ impl CommandHandler {
             }
         };
 
-        info!("Executing enable_script command for: {}", script_id);
+        // v1.2.2: Sanitize script ID for logging
+        info!("Executing enable_script command for: {}", sanitize_for_log(script_id));
 
         // v1.2.0: Use async enable() with internal locking
         match self.script_storage.enable(script_id).await {
@@ -1035,7 +1044,7 @@ impl CommandHandler {
             Ok(false) => (
                 false,
                 json!(null),
-                Some(format!("Script '{}' not found", script_id)),
+                Some(format!("Script '{}' not found", sanitize_for_log(script_id))),
             ),
             Err(e) => (false, json!(null), Some(format!("Enable failed: {}", e))),
         }
@@ -1054,7 +1063,8 @@ impl CommandHandler {
             }
         };
 
-        info!("Executing disable_script command for: {}", script_id);
+        // v1.2.2: Sanitize script ID for logging
+        info!("Executing disable_script command for: {}", sanitize_for_log(script_id));
 
         // v1.2.0: Use async disable() with internal locking
         match self.script_storage.disable(script_id).await {
@@ -1062,7 +1072,7 @@ impl CommandHandler {
             Ok(false) => (
                 false,
                 json!(null),
-                Some(format!("Script '{}' not found", script_id)),
+                Some(format!("Script '{}' not found", sanitize_for_log(script_id))),
             ),
             Err(e) => (false, json!(null), Some(format!("Disable failed: {}", e))),
         }
