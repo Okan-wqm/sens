@@ -363,12 +363,13 @@ impl MqttClient {
                 Err(e) => {
                     consecutive_errors = consecutive_errors.saturating_add(1);
 
-                    // Calculate exponential backoff: min * 2^(errors-1), capped at max
-                    let backoff_secs = std::cmp::min(
-                        min_backoff_secs
-                            .saturating_mul(1u64 << consecutive_errors.saturating_sub(1).min(6)),
-                        max_backoff_secs,
-                    );
+                    // v1.2.6: Clearer exponential backoff: min * 2^(errors-1), capped at max
+                    // Shift amount capped at 6 (max multiplier = 64x)
+                    let shift_amount = consecutive_errors.saturating_sub(1).min(6) as u32;
+                    let multiplier = 1u64 << shift_amount;
+                    let backoff_secs = min_backoff_secs
+                        .saturating_mul(multiplier)
+                        .min(max_backoff_secs);
 
                     error!(
                         "MQTT error (attempt {}): {:?}. Retrying in {}s",

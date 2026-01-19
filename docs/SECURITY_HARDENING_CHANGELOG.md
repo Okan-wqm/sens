@@ -1301,6 +1301,81 @@ if parts.is_empty() {
 
 ---
 
+## PHASE 14: v1.2.6 Deep Audit Round 9
+
+### 14.1 Timestamp Calculation Overflow
+**File**: `src/offline_queue.rs:500`
+**Severity**: MEDIUM
+**Issue**: `max_age_secs as i64 * 1000` overflows for large values
+**Fix**: Use checked_mul with fallback
+
+```rust
+// Before (overflow risk)
+let cutoff = chrono::Utc::now().timestamp_millis() - (self.max_age_secs as i64 * 1000);
+
+// After (safe)
+let max_age_millis = (self.max_age_secs as i64)
+    .checked_mul(1000)
+    .unwrap_or(i64::MAX);
+let cutoff = chrono::Utc::now().timestamp_millis() - max_age_millis;
+```
+
+**Impact**: Prevents silent cleanup failure on misconfigured max_age
+
+---
+
+### 14.2 Misleading Eviction Comment
+**File**: `src/offline_queue.rs:313`
+**Severity**: LOW (Documentation)
+**Issue**: Comment said "10 messages" but code evicts 10% (min 5, max 50)
+**Fix**: Updated comment to match implementation
+
+```rust
+// Before: "Evict 10 oldest messages at a time to make room"
+// After: "Evict 10% of messages (min 5, max 50) to reclaim disk space"
+```
+
+---
+
+### 14.3 Exponential Backoff Clarity
+**File**: `src/mqtt.rs:367-371`
+**Severity**: LOW (Maintainability)
+**Issue**: Complex nested bit shift operation hard to understand
+**Fix**: Split into named intermediate variables
+
+```rust
+// Before (complex one-liner)
+min_backoff_secs.saturating_mul(1u64 << consecutive_errors.saturating_sub(1).min(6))
+
+// After (clear intent)
+let shift_amount = consecutive_errors.saturating_sub(1).min(6) as u32;
+let multiplier = 1u64 << shift_amount;  // Max 64x
+let backoff_secs = min_backoff_secs.saturating_mul(multiplier).min(max_backoff_secs);
+```
+
+**Impact**: Easier code review and maintenance
+
+---
+
+## v1.2.6 Round 9 Files Modified
+
+| File | Changes |
+|------|---------|
+| `src/offline_queue.rs` | Safe timestamp calculation, fixed comment |
+| `src/mqtt.rs` | Clear exponential backoff logic |
+
+---
+
+## v1.2.6 Round 9 Deep Audit Impact
+
+| Issue | Severity | Status |
+|-------|----------|--------|
+| Timestamp overflow | MEDIUM | Fixed |
+| Misleading comment | LOW | Fixed |
+| Backoff clarity | LOW | Fixed |
+
+---
+
 ## v1.2.6 Complete Summary
 
 ### All Rounds Combined
@@ -1315,9 +1390,10 @@ if parts.is_empty() {
 | Round 6 | 0 | 1 | 1 | 1 |
 | Round 7 | 0 | 1 | 3 | 1 |
 | Round 8 | 0 | 1 | 2 | 2 |
-| **Total** | **4** | **8** | **13** | **7** |
+| Round 9 | 0 | 0 | 1 | 2 |
+| **Total** | **4** | **8** | **14** | **9** |
 
-**Grand Total: 32 issues fixed in v1.2.6**
+**Grand Total: 35 issues fixed in v1.2.6**
 
 ---
 

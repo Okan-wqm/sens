@@ -310,7 +310,7 @@ impl OfflineQueue {
         if self.max_disk_bytes > 0 {
             let db_size = self.get_db_size(&conn);
             if db_size >= self.max_disk_bytes {
-                // Evict 10 oldest messages at a time to make room
+                // v1.2.6: Evict 10% of messages (min 5, max 50) to reclaim disk space
                 let evict_count = (current_size / 10).max(5).min(50);
                 self.evict_for_disk_space(&conn, evict_count)?;
             }
@@ -497,7 +497,11 @@ impl OfflineQueue {
             return Ok(0);
         }
 
-        let cutoff = chrono::Utc::now().timestamp_millis() - (self.max_age_secs as i64 * 1000);
+        // v1.2.6: Safe timestamp calculation to prevent overflow on large max_age_secs
+        let max_age_millis = (self.max_age_secs as i64)
+            .checked_mul(1000)
+            .unwrap_or(i64::MAX);
+        let cutoff = chrono::Utc::now().timestamp_millis() - max_age_millis;
 
         let deleted = conn
             .execute(
