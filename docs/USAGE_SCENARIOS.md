@@ -493,4 +493,4 @@ Birden fazla acil durum aynı anda olursa:
 
 ---
 
-*Suderra Edge Agent v1.2.4 - Endüstriyel IoT için güvenilir çözüm*
+*Suderra Edge Agent v1.2.4*
