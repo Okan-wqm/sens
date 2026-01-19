@@ -547,23 +547,31 @@ impl ModbusClient {
                     )
                     .with_context(|| "Failed to create TLS config with client cert")?
                 } else {
-                    // Server-only TLS (no client cert)
-                    // v1.2.3: rodbus full_pki() requires paths even for server-only auth.
-                    // We use empty paths which rodbus interprets as "no client certificate".
-                    // This is a known limitation of the rodbus API.
+                    // Server-only TLS (no client cert / mTLS disabled)
+                    // v1.2.4: rodbus full_pki() requires paths even for server-only auth.
+                    // Empty paths signal "no client certificate" to the rodbus API.
+                    // This is documented behavior - rodbus checks path.as_os_str().is_empty()
                     debug!(
                         "Configuring server-only TLS for '{}' (no client certificate)",
                         self.config.name
                     );
+
+                    // Use empty paths to indicate no client certificate
+                    // rodbus will skip client auth when paths are empty
+                    let empty_path = std::path::Path::new("");
                     rodbus::client::TlsClientConfig::full_pki(
                         Some(server_name.clone()), // Server name for SNI validation
                         ca_path,                   // CA certificate path for server validation
-                        std::path::Path::new(""),  // No client cert (rodbus interprets empty as none)
-                        std::path::Path::new(""),  // No client key (rodbus interprets empty as none)
+                        empty_path,                // No client cert
+                        empty_path,                // No client key
                         None,                      // No password
                         rodbus::client::MinTlsVersion::V1_2,
                     )
-                    .with_context(|| "Failed to create TLS config (server auth only)")?
+                    .with_context(|| format!(
+                        "Failed to create TLS config for '{}'. Ensure CA certificate at '{}' is valid PEM format.",
+                        self.config.name,
+                        ca_path.display()
+                    ))?
                 };
 
                 rodbus::client::spawn_tls_client_task(

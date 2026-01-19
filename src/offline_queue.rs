@@ -512,6 +512,7 @@ impl OfflineQueue {
             .unwrap_or(0);
 
         // Count by priority
+        // v1.2.4: Priority array for Low(0), Normal(1), High(2), Critical(3)
         let mut by_priority = [0usize; 4];
         let mut stmt =
             conn.prepare("SELECT priority, COUNT(*) FROM message_queue GROUP BY priority")?;
@@ -522,6 +523,12 @@ impl OfflineQueue {
             let (priority, count) = row;
             if priority < 4 {
                 by_priority[priority as usize] = count;
+            } else {
+                // v1.2.4: Log corrupted priority values instead of silently dropping
+                warn!(
+                    "Offline queue contains {} messages with invalid priority {} (expected 0-3)",
+                    count, priority
+                );
             }
         }
 

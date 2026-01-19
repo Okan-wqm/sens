@@ -707,26 +707,61 @@ impl ScriptEngine {
                 // - "gpio:17" -> GPIO pin state
                 // - "var:my_variable" -> context variable
                 // - "fb:other_fb.Q" -> another FB's output
+                // v1.2.4: Added explicit error logging for failed input wiring
                 let value = if let Some(source_path) = source.strip_prefix("sensor:") {
-                    self.context.get_sensor(source_path).map(|v| json!(v))
+                    match self.context.get_sensor(source_path) {
+                        Some(v) => Some(json!(v)),
+                        None => {
+                            warn!("FB '{}' input '{}': sensor '{}' not found", fb_id, input_name, source_path);
+                            None
+                        }
+                    }
                 } else if let Some(pin_str) = source.strip_prefix("gpio:") {
-                    pin_str
-                        .parse::<u8>()
-                        .ok()
-                        .and_then(|pin| self.context.get_gpio(pin))
-                        .map(|v| json!(v))
+                    match pin_str.parse::<u8>() {
+                        Ok(pin) => match self.context.get_gpio(pin) {
+                            Some(v) => Some(json!(v)),
+                            None => {
+                                warn!("FB '{}' input '{}': GPIO pin {} not available", fb_id, input_name, pin);
+                                None
+                            }
+                        },
+                        Err(_) => {
+                            warn!("FB '{}' input '{}': invalid GPIO pin '{}' (must be 0-255)", fb_id, input_name, pin_str);
+                            None
+                        }
+                    }
                 } else if let Some(var_name) = source.strip_prefix("var:") {
-                    self.context.get_variable(var_name).cloned()
+                    match self.context.get_variable(var_name) {
+                        Some(v) => Some(v.clone()),
+                        None => {
+                            // Variables may not exist yet, this is often normal
+                            debug!("FB '{}' input '{}': variable '{}' not set", fb_id, input_name, var_name);
+                            None
+                        }
+                    }
                 } else if let Some(fb_ref) = source.strip_prefix("fb:") {
                     // Format: "fb:other_fb_id.output_name"
                     if let Some((other_fb, output_name)) = fb_ref.split_once('.') {
-                        self.fb_registry.get_output(other_fb, output_name)
+                        match self.fb_registry.get_output(other_fb, output_name) {
+                            Some(v) => Some(v),
+                            None => {
+                                debug!("FB '{}' input '{}': FB output '{}' not available yet", fb_id, input_name, fb_ref);
+                                None
+                            }
+                        }
                     } else {
+                        warn!("FB '{}' input '{}': invalid FB reference '{}' (expected 'fb:id.output')", fb_id, input_name, fb_ref);
                         None
                     }
                 } else {
                     // Direct value (literal)
-                    serde_json::from_str(source).ok()
+                    match serde_json::from_str(source) {
+                        Ok(v) => Some(v),
+                        Err(_) => {
+                            warn!("FB '{}' input '{}': invalid literal value '{}'", fb_id, input_name, source);
+                            None
+                        }
+                    }
                 };
 
                 if let Some(val) = value {
@@ -760,6 +795,7 @@ impl ScriptEngine {
                 // Target can be:
                 // - "var:my_variable" -> context variable
                 // - "sensor:virtual_sensor" -> virtual sensor value
+                // v1.2.4: Added explicit logging for unhandled output types
                 if let Some(var_name) = target.strip_prefix("var:") {
                     self.context.set_variable(var_name, value);
                 } else if let Some(sensor_name) = target.strip_prefix("sensor:") {
@@ -768,7 +804,19 @@ impl ScriptEngine {
                     } else if let Some(b) = value.as_bool() {
                         self.context
                             .set_sensor(sensor_name, if b { 1.0 } else { 0.0 });
+                    } else {
+                        // v1.2.4: Log when FB output can't be converted to sensor value
+                        warn!(
+                            "FB '{}' output '{}': cannot convert {:?} to sensor value (expected number or bool)",
+                            fb_id, output_name, value
+                        );
                     }
+                } else {
+                    // v1.2.4: Log unrecognized target format
+                    warn!(
+                        "FB '{}' output '{}': unrecognized target format '{}' (expected 'var:' or 'sensor:')",
+                        fb_id, output_name, target
+                    );
                 }
                 // Note: Direct GPIO/Modbus writes should be done via script actions
                 // for proper conflict detection

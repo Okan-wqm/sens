@@ -107,10 +107,14 @@ impl TriggerManager {
         }
 
         // Check debounce first (read-only)
+        // v1.2.4: Use saturating_sub to handle clock adjustments (NTP, manual time change)
         {
             let state = self.states.get(&state_key).unwrap();
             if let Some(debounce) = trigger.debounce_ms {
-                if now_ms - state.last_triggered < debounce {
+                // saturating_sub returns 0 if now_ms < last_triggered (clock went backwards)
+                // This effectively disables debounce for that cycle, which is safer than
+                // triggering immediately or blocking indefinitely
+                if now_ms.saturating_sub(state.last_triggered) < debounce {
                     return false;
                 }
             }
