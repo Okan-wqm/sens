@@ -203,8 +203,16 @@ impl ProvisioningClient {
         }
 
         // Unknown error - truncate body in logs to prevent credential leakage (v1.2.0 security)
+        // v1.2.6: Use char boundary safe truncation to prevent UTF-8 panic
         let truncated_body = if body.len() > 100 {
-            format!("{}...(truncated)", &body[..100])
+            // Find valid UTF-8 boundary at or before position 100
+            let safe_end = body
+                .char_indices()
+                .take_while(|(i, _)| *i < 100)
+                .last()
+                .map(|(i, c)| i + c.len_utf8())
+                .unwrap_or(0);
+            format!("{}...(truncated)", &body[..safe_end])
         } else {
             body.clone()
         };

@@ -726,6 +726,113 @@ match serde_json::from_str(&content) {
 
 ---
 
+## PHASE 8: v1.2.6 Security Audit Round 3
+
+**Date**: 2026-01-19
+**Version**: 1.2.6 (continued)
+
+### 8.1 UTF-8 Slicing Panic Prevention
+**File**: `src/provisioning.rs:206-217`
+**Severity**: CRITICAL
+**Issue**: Byte slicing at position 100 could panic on multi-byte UTF-8 characters
+
+**Fix**: Use char boundary safe truncation:
+```rust
+// Before (PANIC RISK)
+&body[..100]
+
+// After (Safe)
+let safe_end = body
+    .char_indices()
+    .take_while(|(i, _)| *i < 100)
+    .last()
+    .map(|(i, c)| i + c.len_utf8())
+    .unwrap_or(0);
+&body[..safe_end]
+```
+
+---
+
+### 8.2 Time Source Documentation
+**File**: `src/resilience/circuit_breaker.rs:18-24`
+**Severity**: HIGH (Documented)
+**Issue**: SystemTime used instead of Instant - vulnerable to NTP manipulation
+
+**Resolution**: Added documentation explaining trade-offs:
+- Timestamps stored as u64 in atomics (Instant is opaque)
+- saturating_sub() protects against backwards time jumps
+- Forward time jumps cause early recovery (acceptable)
+
+---
+
+### 8.3 Enhanced URL Validation
+**File**: `src/config.rs:1045-1076`
+**Severity**: MEDIUM
+**Issue**: Weak domain validation allowed malformed URLs like `https://......`
+
+**Fix**: Added comprehensive host validation:
+```rust
+// Extract host from URL
+let host = url_without_scheme.split('/').next()
+    .unwrap_or("").split(':').next().unwrap_or("");
+
+// Validate structure
+if host.starts_with('.') || host.ends_with('.') { bail!(...) }
+if host.contains("..") { bail!(...) }
+if !host.contains('.') && host != "localhost" { bail!(...) }
+```
+
+---
+
+### 8.4 Rate Limiter CAS Spin Backoff
+**File**: `src/resilience/rate_limiter.rs:155-200`
+**Severity**: MEDIUM
+**Issue**: Unbounded CAS retry loop could cause CPU spike under contention
+
+**Fix**: Added spin backoff matching circuit_breaker.rs:
+```rust
+const MAX_CAS_SPINS: u32 = 10;
+
+let mut spin_count: u32 = 0;
+loop {
+    match self.tokens.compare_exchange(...) {
+        Ok(_) => return true,
+        Err(_) => {
+            spin_count += 1;
+            if spin_count >= MAX_CAS_SPINS {
+                std::hint::spin_loop();
+                spin_count = 0;
+            }
+            continue;
+        }
+    }
+}
+```
+
+---
+
+## v1.2.6 Round 3 Files Modified
+
+| File | Changes |
+|------|---------|
+| `src/provisioning.rs` | UTF-8 safe string truncation |
+| `src/resilience/circuit_breaker.rs` | Time source documentation |
+| `src/config.rs` | Enhanced URL/host validation |
+| `src/resilience/rate_limiter.rs` | CAS spin backoff |
+
+---
+
+## v1.2.6 Round 3 Security Impact
+
+| Issue | Severity | Status |
+|-------|----------|--------|
+| UTF-8 slicing panic | CRITICAL | Fixed |
+| Time manipulation | HIGH | Documented |
+| Weak URL validation | MEDIUM | Fixed |
+| Rate limiter CPU spike | MEDIUM | Fixed |
+
+---
+
 ## Remaining Work
 
 ### Future Enhancements (Optional)

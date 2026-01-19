@@ -16,6 +16,14 @@ const STATE_OPEN: u8 = 1;
 const STATE_HALF_OPEN: u8 = 2;
 
 /// Get current timestamp in milliseconds since UNIX epoch
+///
+/// # v1.2.6 Note on Time Sources
+/// Uses SystemTime rather than Instant because:
+/// 1. Timestamps must be stored as u64 in atomics (Instant is opaque)
+/// 2. saturating_sub() protects against backwards time jumps (NTP sync)
+/// 3. Forward time jumps may cause early recovery (acceptable trade-off)
+///
+/// For critical timing, consider using Instant with a reference point.
 fn now_millis() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

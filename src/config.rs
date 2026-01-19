@@ -1043,12 +1043,43 @@ impl AgentConfig {
         }
 
         // v1.2.5: Basic URL structure validation (must have host part)
+        // v1.2.6: Enhanced validation to reject malformed domains
         let url_without_scheme = self
             .api_url
             .strip_prefix("https://")
             .or_else(|| self.api_url.strip_prefix("http://"))
             .unwrap_or("");
-        if url_without_scheme.is_empty() || !url_without_scheme.contains('.') {
+
+        // Extract host part (before any path, query, or port)
+        let host = url_without_scheme
+            .split('/')
+            .next()
+            .unwrap_or("")
+            .split(':')
+            .next()
+            .unwrap_or("");
+
+        // Validate host structure
+        if host.is_empty() {
+            anyhow::bail!(
+                "api_url '{}' appears invalid (missing host)",
+                self.api_url
+            );
+        }
+        if host.starts_with('.') || host.ends_with('.') {
+            anyhow::bail!(
+                "api_url '{}' has invalid host (cannot start/end with dot)",
+                self.api_url
+            );
+        }
+        if host.contains("..") {
+            anyhow::bail!(
+                "api_url '{}' has invalid host (consecutive dots not allowed)",
+                self.api_url
+            );
+        }
+        // Must have at least one dot (except localhost)
+        if !host.contains('.') && host != "localhost" {
             anyhow::bail!(
                 "api_url '{}' appears invalid (must have a host like https://api.example.com)",
                 self.api_url

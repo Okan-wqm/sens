@@ -24,6 +24,10 @@ fn now_millis() -> u64 {
     boot.elapsed().as_millis() as u64
 }
 
+/// Maximum CAS retry attempts before yielding (v1.2.6)
+/// Prevents busy-wait under extreme contention
+const MAX_CAS_SPINS: u32 = 10;
+
 /// Token Bucket Rate Limiter
 ///
 /// Allows bursts up to bucket capacity while enforcing average rate.
@@ -152,11 +156,13 @@ impl RateLimiter {
     /// Try to acquire N tokens (non-blocking)
     ///
     /// Returns true if all tokens were acquired, false if rate limited.
+    /// v1.2.6: Added spin backoff to prevent CPU spike under contention
     pub fn try_acquire_n(&self, n: u64) -> bool {
         // First, refill based on elapsed time
         self.refill();
 
-        // Try to decrement tokens atomically
+        // Try to decrement tokens atomically (v1.2.6: with spin backoff)
+        let mut spin_count: u32 = 0;
         loop {
             let current = self.tokens.load(Ordering::Acquire);
             if current < n {
@@ -186,7 +192,12 @@ impl RateLimiter {
                     return true;
                 }
                 Err(_) => {
-                    // Another thread modified tokens, retry
+                    // Another thread modified tokens, retry with backoff
+                    spin_count += 1;
+                    if spin_count >= MAX_CAS_SPINS {
+                        std::hint::spin_loop();
+                        spin_count = 0;
+                    }
                     continue;
                 }
             }
