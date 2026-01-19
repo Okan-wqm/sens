@@ -190,7 +190,8 @@ impl FunctionBlock for TON {
                 }
                 TimerMode::ScanCycle => {
                     self.scan_count += 1;
-                    self.et_ms = self.scan_count * self.cycle_time_ms;
+                    // v1.2.6: Prevent overflow on long-running timers
+                    self.et_ms = self.scan_count.saturating_mul(self.cycle_time_ms);
                 }
             }
 

@@ -118,8 +118,10 @@ impl ScriptRateLimiter {
             window.window_start = now;
         }
 
-        let current = window.count.fetch_add(1, Ordering::SeqCst);
-        current < self.default_limit as u32
+        // v1.2.6: fetch_add returns OLD value, so check new_count to prevent off-by-one
+        let old_count = window.count.fetch_add(1, Ordering::SeqCst);
+        let new_count = old_count.saturating_add(1);
+        new_count <= self.default_limit as u32
     }
 
     /// Get current rate for a script

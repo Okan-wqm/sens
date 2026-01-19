@@ -1710,6 +1710,7 @@ impl ScriptEngine {
 
         // v1.2.4: Use shared HTTP client (lazy initialization)
         // Reusing client maintains connection pool and reduces memory/CPU overhead
+        // v1.2.6: Fixed - now properly saves client for reuse
         let client = match &self.http_client {
             Some(c) => c.clone(),
             None => {
@@ -1727,6 +1728,8 @@ impl ScriptEngine {
                         );
                     }
                 };
+                // v1.2.6: Save client for connection reuse
+                self.http_client = Some(new_client.clone());
                 new_client
             }
         };

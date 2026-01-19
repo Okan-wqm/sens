@@ -131,8 +131,9 @@ impl RateLimiter {
                 .is_ok()
             {
                 // Successfully claimed the refill, add tokens
+                // v1.2.6: Use saturating_add to prevent overflow before min()
                 let current = self.tokens.load(Ordering::Acquire);
-                let new_tokens = (current + tokens_to_add).min(self.capacity);
+                let new_tokens = current.saturating_add(tokens_to_add).min(self.capacity);
                 self.tokens.store(new_tokens, Ordering::Release);
 
                 tracing::trace!(
