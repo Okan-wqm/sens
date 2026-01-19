@@ -28,6 +28,9 @@ mod shutdown;
 mod telemetry;
 mod backup; // v1.2.4: Backup and restore functionality
 mod alarms; // v1.2.4: Alarm management (IEC 62682)
+mod pwm; // v1.2.4: PWM support for motor/servo control
+mod i2c; // v1.2.4: I2C support for sensor communication
+mod spi; // v1.2.4: SPI support for high-speed peripherals
 
 use anyhow::{Context, Result};
 use std::sync::Arc;
