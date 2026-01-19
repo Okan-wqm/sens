@@ -5,7 +5,7 @@
 use anyhow::{anyhow, Result};
 use std::time::Duration;
 use tokio::time::timeout;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 /// Default connection timeout
 pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);

@@ -29,7 +29,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 // ============================================================================
 // Constants
@@ -426,24 +426,43 @@ impl OpcUaClient {
     }
 
     /// Parse endpoint URL to get host and port
+    /// Supports both IPv4 and IPv6 addresses (RFC 3986 bracket notation)
     fn parse_endpoint(&self) -> Result<(String, u16)> {
         let url = &self.config.endpoint_url;
 
-        // Format: opc.tcp://host:port/path
+        // Format: opc.tcp://host:port/path or opc.tcp://[ipv6]:port/path
         let stripped = url
             .strip_prefix("opc.tcp://")
             .ok_or_else(|| anyhow!("Invalid OPC UA endpoint URL"))?;
 
         let host_port = stripped.split('/').next().unwrap_or(stripped);
 
-        if let Some(colon_pos) = host_port.rfind(':') {
-            let host = &host_port[..colon_pos];
-            let port: u16 = host_port[colon_pos + 1..]
-                .parse()
-                .unwrap_or(DEFAULT_OPCUA_PORT);
-            Ok((host.to_string(), port))
+        // Handle IPv6 addresses in bracket notation (RFC 3986)
+        if host_port.starts_with('[') {
+            // IPv6: [::1]:4840 or [2001:db8::1]:4840
+            if let Some(bracket_end) = host_port.find(']') {
+                let host = &host_port[1..bracket_end]; // Remove brackets
+                let after_bracket = &host_port[bracket_end + 1..];
+                let port = if after_bracket.starts_with(':') {
+                    after_bracket[1..].parse().unwrap_or(DEFAULT_OPCUA_PORT)
+                } else {
+                    DEFAULT_OPCUA_PORT
+                };
+                Ok((host.to_string(), port))
+            } else {
+                Err(anyhow!("Invalid IPv6 address: missing closing bracket"))
+            }
         } else {
-            Ok((host_port.to_string(), DEFAULT_OPCUA_PORT))
+            // IPv4 or hostname: 192.168.1.1:4840 or plc.local:4840
+            if let Some(colon_pos) = host_port.rfind(':') {
+                let host = &host_port[..colon_pos];
+                let port: u16 = host_port[colon_pos + 1..]
+                    .parse()
+                    .unwrap_or(DEFAULT_OPCUA_PORT);
+                Ok((host.to_string(), port))
+            } else {
+                Ok((host_port.to_string(), DEFAULT_OPCUA_PORT))
+            }
         }
     }
 

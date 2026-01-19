@@ -28,7 +28,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 // ============================================================================
 // Constants
@@ -424,7 +424,8 @@ impl S7Client {
             S7_FUNC_PLC_STOP
         };
 
-        let param = if start { b"P_PROGRAM" } else { b"P_PROGRAM" };
+        // S7 control parameters: P_PROGRAM for start, _STOP for stop
+        let param: &[u8] = if start { b"P_PROGRAM" } else { b"_STOP" };
 
         vec![
             S7_PROTOCOL_ID,

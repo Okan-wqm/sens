@@ -30,7 +30,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 // ============================================================================
 // Constants
@@ -228,7 +228,8 @@ impl CodesysClient {
 
     /// Build protocol packet
     fn build_packet(&self, service_id: ServiceId, payload: &[u8]) -> Vec<u8> {
-        let mut packet = Vec::with_capacity(12 + payload.len());
+        // Header: magic(4) + length(4) + service_id(2) + reserved(2) + payload_len(4) = 16 bytes
+        let mut packet = Vec::with_capacity(16 + payload.len());
 
         // Magic header
         packet.extend_from_slice(&CODESYS_MAGIC);
@@ -253,9 +254,10 @@ impl CodesysClient {
     }
 
     /// Parse protocol response
+    /// Header structure: magic[0:4] + length[4:8] + service_id[8:10] + reserved[10:12] + payload_len[12:16]
     fn parse_response(&self, data: &[u8]) -> Result<(ResponseCode, Vec<u8>)> {
-        if data.len() < 12 {
-            return Err(anyhow!("Response too short"));
+        if data.len() < 16 {
+            return Err(anyhow!("Response too short (need 16 bytes header, got {})", data.len()));
         }
 
         // Check magic
@@ -263,18 +265,18 @@ impl CodesysClient {
             return Err(anyhow!("Invalid response magic"));
         }
 
-        // Parse response code
+        // Parse response code (service_id position)
         let response_code = u16::from_le_bytes([data[8], data[9]]);
         let code = ResponseCode::from_u16(response_code);
 
-        // Parse payload length
-        let payload_len = u32::from_le_bytes([data[10], data[11], data[12], data[13]]) as usize;
+        // Parse payload length (bytes 12-15, not 10-13)
+        let payload_len = u32::from_le_bytes([data[12], data[13], data[14], data[15]]) as usize;
 
-        if data.len() < 14 + payload_len {
-            return Err(anyhow!("Response payload truncated"));
+        if data.len() < 16 + payload_len {
+            return Err(anyhow!("Response payload truncated (expected {}, got {})", 16 + payload_len, data.len()));
         }
 
-        let payload = data[14..14 + payload_len].to_vec();
+        let payload = data[16..16 + payload_len].to_vec();
 
         Ok((code, payload))
     }
@@ -291,12 +293,12 @@ impl CodesysClient {
         // Send
         conn.write_all(&packet).await?;
 
-        // Receive response header
-        let mut header = [0u8; 14];
+        // Receive response header (16 bytes: magic + length + service_id + reserved + payload_len)
+        let mut header = [0u8; 16];
         conn.read_exact(&mut header).await?;
 
-        // Parse header to get payload length
-        let payload_len = u32::from_le_bytes([header[10], header[11], header[12], header[13]]) as usize;
+        // Parse header to get payload length (bytes 12-15)
+        let payload_len = u32::from_le_bytes([header[12], header[13], header[14], header[15]]) as usize;
 
         // Read payload
         let mut response_payload = vec![0u8; payload_len];
@@ -322,13 +324,28 @@ impl CodesysClient {
         let mut payload = Vec::new();
 
         // Username (null-terminated, padded to 32 bytes)
-        let username = self.config.username.as_deref().unwrap_or("admin");
+        // Security: Require explicit credentials - no hardcoded defaults (IEC 62443)
+        let username = match &self.config.username {
+            Some(u) => u.as_str(),
+            None => {
+                warn!("No username configured for Codesys PLC - using anonymous login");
+                ""
+            }
+        };
         let mut user_bytes = username.as_bytes().to_vec();
         user_bytes.resize(32, 0);
         payload.extend_from_slice(&user_bytes);
 
         // Password (null-terminated, padded to 32 bytes)
-        let password = self.config.password.as_deref().unwrap_or("");
+        let password = match &self.config.password {
+            Some(p) => p.as_str(),
+            None => {
+                if self.config.username.is_some() {
+                    warn!("Username provided but no password - authentication may fail");
+                }
+                ""
+            }
+        };
         let mut pass_bytes = password.as_bytes().to_vec();
         pass_bytes.resize(32, 0);
         payload.extend_from_slice(&pass_bytes);
@@ -494,11 +511,11 @@ impl PlcProgrammer for CodesysClient {
         // Upload
         let response = self.send_receive(ServiceId::UploadApp, &compiled).await;
 
-        let (success, errors) = match response {
+        let (success, warnings, errors) = match response {
             Ok(data) => {
                 // Parse compilation result
                 let mut warnings = Vec::new();
-                let mut errors = Vec::new();
+                let errors = Vec::new();
 
                 if !data.is_empty() {
                     // First byte: warning count
@@ -509,9 +526,9 @@ impl PlcProgrammer for CodesysClient {
                     }
                 }
 
-                (true, errors)
+                (true, warnings, errors)
             }
-            Err(e) => (false, vec![e.to_string()]),
+            Err(e) => (false, Vec::new(), vec![e.to_string()]),
         };
 
         let result = UploadResult {
@@ -521,7 +538,7 @@ impl PlcProgrammer for CodesysClient {
             } else {
                 None
             },
-            warnings: Vec::new(),
+            warnings, // Fixed: was Vec::new(), now uses collected warnings
             errors,
             timestamp: chrono::Utc::now().to_rfc3339(),
             plc_response: HashMap::new(),

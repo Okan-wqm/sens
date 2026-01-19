@@ -23,7 +23,7 @@ use tracing::{debug, error, info, warn};
 use crate::AppState;
 use crate::mqtt::{CommandMessage, CommandResponse, IncomingMessage};
 use crate::plc_programming::{
-    PlcProgrammer, PlcProgram, PlcProgrammingConfig,
+    PlcProgrammer, PlcProgram,
     CodesysClient, S7Client, OpcUaClient, EtherNetIpClient, AdsClient,
 };
 use crate::scripting::{ExecutionMode, FBDefinition, ScriptDefinition, ScriptStorage};
