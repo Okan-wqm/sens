@@ -315,6 +315,15 @@ impl CommandHandler {
 
     /// Execute a command and return response
     async fn execute_command(&mut self, command: &CommandMessage) -> CommandResponse {
+        // v1.2.6: Track command execution time for observability
+        let start_time = std::time::Instant::now();
+        info!(
+            "⚡ Command received: id='{}', command='{}', has_params={}",
+            command.command_id,
+            sanitize_for_log(&command.command),
+            !command.params.is_null()
+        );
+
         let device_id = {
             let state = self.state.read().await;
             state.config.device_id.clone()
@@ -357,6 +366,25 @@ impl CommandHandler {
                 )
             }
         };
+
+        // v1.2.6: Log command completion with timing
+        let elapsed = start_time.elapsed();
+        if success {
+            info!(
+                "✅ Command completed: id='{}', command='{}', success=true, duration={:?}",
+                command.command_id,
+                sanitize_for_log(&command.command),
+                elapsed
+            );
+        } else {
+            warn!(
+                "❌ Command failed: id='{}', command='{}', error={:?}, duration={:?}",
+                command.command_id,
+                sanitize_for_log(&command.command),
+                error,
+                elapsed
+            );
+        }
 
         CommandResponse {
             command_id: command.command_id.clone(),

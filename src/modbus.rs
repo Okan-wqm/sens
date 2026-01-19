@@ -740,6 +740,12 @@ impl ModbusClient {
         for register in registers.iter() {
             match self.read_register_with_timeout(register).await {
                 Ok(value) => {
+                    // v1.2.6: Log successful register reads at debug level
+                    debug!(
+                        "📊 Modbus READ: device='{}', register='{}', value={:.4} {}",
+                        self.config.name, register.name, value.scaled_value,
+                        value.unit.as_deref().unwrap_or("")
+                    );
                     result.values.push(value);
                     had_success = true;
                 }
@@ -924,7 +930,11 @@ impl ModbusClient {
             .await
             .map_err(|e| anyhow::anyhow!("Failed to write register: {:?}", e))?;
 
-        debug!("Wrote value {} to register {}", value, address);
+        // v1.2.6: Enhanced Modbus write logging
+        info!(
+            "📝 Modbus WRITE: device='{}', register={}, value={}",
+            self.config.name, address, value
+        );
         Ok(())
     }
 
@@ -955,7 +965,11 @@ impl ModbusClient {
             .await
             .map_err(|e| anyhow::anyhow!("Failed to write coil: {:?}", e))?;
 
-        debug!("Wrote value {} to coil {}", value, address);
+        // v1.2.6: Enhanced Modbus write logging
+        info!(
+            "📝 Modbus WRITE COIL: device='{}', coil={}, value={}",
+            self.config.name, address, value
+        );
         Ok(())
     }
 

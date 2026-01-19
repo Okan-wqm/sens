@@ -147,8 +147,9 @@ impl CircuitBreaker {
                                 // Successfully transitioned to half-open
                                 self.success_count.store(0, Ordering::Release);
                                 self.half_open_permits.store(0, Ordering::Release); // Reset permits
+                                // v1.2.6: Enhanced state transition logging
                                 tracing::info!(
-                                    "Circuit breaker '{}' transitioning to half-open",
+                                    "🔄 Circuit breaker '{}': OPEN → HALF-OPEN (testing recovery)",
                                     self.name
                                 );
                                 // Fall through to half-open permit check
@@ -260,7 +261,11 @@ impl CircuitBreaker {
                     {
                         self.failure_count.store(0, Ordering::Release);
                         self.half_open_permits.store(0, Ordering::Release); // Reset permits
-                        tracing::info!("Circuit breaker '{}' closed after recovery", self.name);
+                        // v1.2.6: Enhanced state transition logging
+                        tracing::info!(
+                            "🟢 Circuit breaker '{}': HALF-OPEN → CLOSED (recovered after {} successes)",
+                            self.name, count
+                        );
                     }
                 }
             }
@@ -304,11 +309,19 @@ impl CircuitBreaker {
         let prev = self.state.swap(STATE_OPEN, Ordering::AcqRel);
 
         // Only log if we actually changed the state
+        // v1.2.6: Enhanced state transition logging
         if prev != STATE_OPEN {
+            let prev_state = match prev {
+                STATE_CLOSED => "CLOSED",
+                STATE_HALF_OPEN => "HALF-OPEN",
+                _ => "UNKNOWN",
+            };
             tracing::warn!(
-                "Circuit breaker '{}' opened after {} failures",
+                "🔴 Circuit breaker '{}': {} → OPEN (tripped after {} failures, recovery in {}ms)",
                 self.name,
-                self.failure_count.load(Ordering::Acquire)
+                prev_state,
+                self.failure_count.load(Ordering::Acquire),
+                self.recovery_timeout_ms
             );
         }
     }

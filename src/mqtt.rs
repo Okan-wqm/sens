@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 // Removed unused: AtomicU64, Ordering (v1.2.3 cleanup)
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 /// Message channel capacity (v1.2.3: increased from 100 to 500)
 /// Higher capacity reduces message loss during burst traffic
@@ -290,7 +290,14 @@ impl MqttClient {
             match eventloop.poll().await {
                 Ok(Event::Incoming(Packet::Publish(publish))) => {
                     consecutive_errors = 0; // Reset on success
-                    debug!("Received message on topic: {}", publish.topic);
+                    // v1.2.6: Enhanced logging with message details
+                    info!(
+                        "📥 MQTT message received: topic='{}', size={} bytes, qos={:?}, retain={}",
+                        publish.topic,
+                        publish.payload.len(),
+                        publish.qos,
+                        publish.retain
+                    );
 
                     let topic_for_log = publish.topic.clone();
                     let mut msg = IncomingMessage {
@@ -346,19 +353,30 @@ impl MqttClient {
                 }
                 Ok(Event::Incoming(Packet::ConnAck(connack))) => {
                     consecutive_errors = 0; // Reset on successful connection
-                    info!("MQTT connected: {:?}", connack.code);
+                    // v1.2.6: Enhanced connection logging
+                    info!(
+                        "🟢 MQTT CONNECTED: code={:?}, session_present={}",
+                        connack.code, connack.session_present
+                    );
                 }
-                Ok(Event::Incoming(Packet::SubAck(_))) => {
-                    debug!("Subscription acknowledged");
+                Ok(Event::Incoming(Packet::SubAck(suback))) => {
+                    // v1.2.6: Log subscription acknowledgment with QoS
+                    info!("📋 MQTT subscription acknowledged: qos={:?}", suback.return_codes);
                 }
                 Ok(Event::Incoming(Packet::PingResp)) => {
-                    debug!("Ping response received");
+                    trace!("🏓 MQTT ping response received (connection alive)");
                 }
-                Ok(Event::Outgoing(_)) => {
-                    // Outgoing events (publish, subscribe) - no action needed
+                Ok(Event::Incoming(Packet::Disconnect)) => {
+                    // v1.2.6: Log disconnection events
+                    warn!("🔴 MQTT DISCONNECTED by broker");
                 }
-                Ok(_) => {
-                    // Other events
+                Ok(Event::Outgoing(outgoing)) => {
+                    // v1.2.6: Log outgoing events at trace level
+                    trace!("📤 MQTT outgoing event: {:?}", outgoing);
+                }
+                Ok(event) => {
+                    // v1.2.6: Log other events at trace level
+                    trace!("MQTT event: {:?}", event);
                 }
                 Err(e) => {
                     consecutive_errors = consecutive_errors.saturating_add(1);
@@ -413,13 +431,18 @@ impl MqttClient {
         };
 
         let payload = serde_json::to_vec(&message)?;
+        let payload_len = payload.len();
 
         self.client
             .publish(&self.topics.status, QoS::AtLeastOnce, true, payload)
             .await
             .context("Failed to publish status")?;
 
-        debug!("Published status: {:?}", status);
+        // v1.2.6: Enhanced publish logging
+        info!(
+            "📤 MQTT status published: topic='{}', status={:?}, size={} bytes",
+            self.topics.status, status, payload_len
+        );
         Ok(())
     }
 
@@ -433,26 +456,38 @@ impl MqttClient {
         };
 
         let payload = serde_json::to_vec(&message)?;
+        let payload_len = payload.len();
 
         self.client
             .publish(&self.topics.telemetry, QoS::AtMostOnce, false, payload)
             .await
             .context("Failed to publish telemetry")?;
 
-        debug!("Published telemetry");
+        // v1.2.6: Enhanced telemetry logging
+        info!(
+            "📤 MQTT telemetry published: topic='{}', size={} bytes",
+            self.topics.telemetry, payload_len
+        );
         Ok(())
     }
 
     /// Publish command response
     pub async fn publish_response(&self, response: CommandResponse) -> Result<()> {
         let payload = serde_json::to_vec(&response)?;
+        let payload_len = payload.len();
+        let command_id = response.command_id.clone();
+        let success = response.success;
 
         self.client
             .publish(&self.topics.responses, QoS::AtLeastOnce, false, payload)
             .await
             .context("Failed to publish response")?;
 
-        debug!("Published response for command: {}", response.command_id);
+        // v1.2.6: Enhanced response logging
+        info!(
+            "📤 MQTT response published: topic='{}', command_id='{}', success={}, size={} bytes",
+            self.topics.responses, command_id, success, payload_len
+        );
         Ok(())
     }
 

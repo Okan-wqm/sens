@@ -609,10 +609,12 @@ impl GpioActor {
             } else {
                 output_pin.set_low();
             }
-            debug!(
-                "Set GPIO pin {} to {} (invert={:?})",
+            // v1.2.6: Enhanced GPIO logging for observability
+            info!(
+                "📍 GPIO WRITE: pin={}, value={} (actual={}, invert={:?})",
                 pin,
                 value,
+                actual_value,
                 config.map(|c| c.invert)
             );
             Ok(())
@@ -636,9 +638,10 @@ impl GpioActor {
                 PinState::Low
             };
             self.simulated_states.insert(pin, state);
-            debug!(
-                "Simulated GPIO pin {} set to {:?} (invert={})",
-                pin, state, config.invert
+            // v1.2.6: Enhanced GPIO logging for observability
+            info!(
+                "📍 GPIO WRITE [SIM]: pin={}, value={}, state={:?}, invert={}",
+                pin, value, state, config.invert
             );
             Ok(())
         } else {
