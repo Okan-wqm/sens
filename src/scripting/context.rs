@@ -163,13 +163,15 @@ impl ScriptContext {
                                     "Invalid timezone_offset_secs: {}. Valid range is -43200 to 50400. Falling back to UTC.",
                                     self.timezone_offset_secs
                                 );
-                                FixedOffset::east_opt(0).unwrap()
+                                // v1.2.6: UTC offset (0) is always valid per chrono spec
+                                FixedOffset::east_opt(0).expect("UTC offset 0 is always valid")
                             }
                         };
                         offset.from_utc_datetime(&utc_now.naive_utc())
                     } else {
+                        // v1.2.6: UTC offset (0) is always valid per chrono spec
                         FixedOffset::east_opt(0)
-                            .unwrap()
+                            .expect("UTC offset 0 is always valid")
                             .from_utc_datetime(&utc_now.naive_utc())
                     };
                     match source_name {

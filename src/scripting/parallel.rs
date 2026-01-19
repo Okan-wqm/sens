@@ -267,7 +267,10 @@ impl ParallelExecutor {
         // Collect results based on sync type
         let mut results = Vec::new();
         let overall_timeout = divergence.timeout_ms.unwrap_or(self.default_timeout_ms);
-        let deadline = Instant::now() + Duration::from_millis(overall_timeout);
+        // v1.2.6: Cap timeout to prevent Instant overflow (max ~1 hour)
+        const MAX_TIMEOUT_MS: u64 = 3_600_000;
+        let safe_timeout = overall_timeout.min(MAX_TIMEOUT_MS);
+        let deadline = Instant::now() + Duration::from_millis(safe_timeout);
 
         match divergence.sync_type {
             SyncType::And | SyncType::AllSettled => {

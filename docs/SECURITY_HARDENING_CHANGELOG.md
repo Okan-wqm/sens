@@ -1171,6 +1171,136 @@ let reload_interval = ((30000 + self.scan_cycle_ms - 1) / self.scan_cycle_ms).ma
 
 ---
 
+## PHASE 13: v1.2.6 Comprehensive Audit Round 8
+
+### 13.1 Timezone Offset Documentation
+**File**: `src/scripting/context.rs:166,171-172`
+**Severity**: LOW (Documentation)
+**Issue**: `FixedOffset::east_opt(0).unwrap()` without clear invariant documentation
+**Fix**: Changed to `expect()` with explicit contract
+
+```rust
+// Before
+FixedOffset::east_opt(0).unwrap()
+
+// After
+FixedOffset::east_opt(0).expect("UTC offset 0 is always valid")
+```
+
+**Impact**: Clear documentation of invariant for maintainers
+
+---
+
+### 13.2 Timeout Overflow Prevention
+**File**: `src/scripting/parallel.rs:270`
+**Severity**: HIGH
+**Issue**: Adding large timeout to `Instant::now()` could overflow
+**Fix**: Cap timeout to 1 hour maximum
+
+```rust
+// Before
+let deadline = Instant::now() + Duration::from_millis(overall_timeout);
+
+// After
+const MAX_TIMEOUT_MS: u64 = 3_600_000; // 1 hour
+let safe_timeout = overall_timeout.min(MAX_TIMEOUT_MS);
+let deadline = Instant::now() + Duration::from_millis(safe_timeout);
+```
+
+**Impact**: Prevents panic on malicious/erroneous timeout configs
+
+---
+
+### 13.3 Range Validation for Between Operator
+**File**: `src/scripting/triggers.rs:371-373`
+**Severity**: MEDIUM
+**Issue**: No validation that min <= max in `between` comparisons
+**Fix**: Added warning and early return
+
+```rust
+// Before - silently returns false
+return l >= min && l <= max;
+
+// After - warns about invalid config
+if min > max {
+    warn!("Invalid 'between' range: min ({}) > max ({})", min, max);
+    return false;
+}
+return l >= min && l <= max;
+```
+
+**Impact**: Config errors now visible in logs
+
+---
+
+### 13.4 Bounded Error Vector in Modbus
+**File**: `src/modbus.rs:746`
+**Severity**: MEDIUM
+**Issue**: Error vector grows unbounded on repeated failures
+**Fix**: Cap at 50 errors with truncation message
+
+```rust
+const MAX_ERRORS_PER_READ: usize = 50;
+
+if result.errors.len() < MAX_ERRORS_PER_READ {
+    result.errors.push(format!("{}: {}", register.name, e));
+} else if result.errors.len() == MAX_ERRORS_PER_READ {
+    result.errors.push("[Additional errors truncated]".to_string());
+}
+```
+
+**Impact**: Prevents memory growth under high error conditions
+
+---
+
+### 13.5 Improved Cron Error Messages
+**File**: `src/scripting/triggers.rs:247-250`
+**Severity**: LOW
+**Issue**: Generic "Invalid cron expression" error without details
+**Fix**: Added field count and format hint
+
+```rust
+// Before
+warn!("Invalid cron expression: {}", cron);
+
+// After
+if parts.is_empty() {
+    warn!("Empty cron expression");
+} else if parts.len() < 5 {
+    warn!(
+        "Invalid cron expression '{}': expected 5 fields (minute hour day month weekday), got {}",
+        cron, parts.len()
+    );
+}
+```
+
+**Impact**: Better debugging for configuration issues
+
+---
+
+## v1.2.6 Round 8 Files Modified
+
+| File | Changes |
+|------|---------|
+| `src/scripting/context.rs` | Timezone offset expect() documentation |
+| `src/scripting/parallel.rs` | Timeout overflow prevention |
+| `src/scripting/triggers.rs` | Range validation, cron error messages |
+| `src/modbus.rs` | Bounded error vector |
+
+---
+
+## v1.2.6 Round 8 Comprehensive Audit Impact
+
+| Issue | Severity | Status |
+|-------|----------|--------|
+| Timeout overflow | HIGH | Fixed |
+| Range validation | MEDIUM | Fixed |
+| Error vector growth | MEDIUM | Fixed |
+| Timezone docs | LOW | Fixed |
+| Cron error messages | LOW | Fixed |
+
+---
+
 ## v1.2.6 Complete Summary
 
 ### All Rounds Combined
@@ -1184,9 +1314,10 @@ let reload_interval = ((30000 + self.scan_cycle_ms - 1) / self.scan_cycle_ms).ma
 | Round 5 | 0 | 1 | 0 | 0 |
 | Round 6 | 0 | 1 | 1 | 1 |
 | Round 7 | 0 | 1 | 3 | 1 |
-| **Total** | **4** | **7** | **11** | **5** |
+| Round 8 | 0 | 1 | 2 | 2 |
+| **Total** | **4** | **8** | **13** | **7** |
 
-**Grand Total: 27 issues fixed in v1.2.6**
+**Grand Total: 32 issues fixed in v1.2.6**
 
 ---
 

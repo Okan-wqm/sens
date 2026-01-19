@@ -244,8 +244,16 @@ impl TriggerManager {
         let now = Utc::now();
         let parts: Vec<&str> = cron.split_whitespace().collect();
 
+        // v1.2.6: Improved error message with field count
+        if parts.is_empty() {
+            warn!("Empty cron expression");
+            return false;
+        }
         if parts.len() < 5 {
-            warn!("Invalid cron expression: {}", cron);
+            warn!(
+                "Invalid cron expression '{}': expected 5 fields (minute hour day month weekday), got {}",
+                cron, parts.len()
+            );
             return false;
         }
 
@@ -370,6 +378,14 @@ impl TriggerManager {
                         if arr.len() >= 2 {
                             let min = arr[0].as_f64().unwrap_or(f64::MIN);
                             let max = arr[1].as_f64().unwrap_or(f64::MAX);
+                            // v1.2.6: Validate min <= max
+                            if min > max {
+                                warn!(
+                                    "Invalid 'between' range: min ({}) > max ({})",
+                                    min, max
+                                );
+                                return false;
+                            }
                             return l >= min && l <= max;
                         }
                     }

@@ -63,6 +63,8 @@ const FC_READ_INPUT_REGISTERS: u8 = 4;
 const FC_WRITE_SINGLE_COIL: u8 = 5;
 /// FC 6: Write Single Register
 const FC_WRITE_SINGLE_REGISTER: u8 = 6;
+/// v1.2.6: Maximum errors to collect per read operation (prevents unbounded growth)
+const MAX_ERRORS_PER_READ: usize = 50;
 // FC 15, 16 (Write Multiple) not implemented - use single writes
 
 // ============================================================================
@@ -743,7 +745,12 @@ impl ModbusClient {
                 }
                 Err(e) => {
                     warn!("Failed to read register {}: {}", register.name, e);
-                    result.errors.push(format!("{}: {}", register.name, e));
+                    // v1.2.6: Limit error vector growth
+                    if result.errors.len() < MAX_ERRORS_PER_READ {
+                        result.errors.push(format!("{}: {}", register.name, e));
+                    } else if result.errors.len() == MAX_ERRORS_PER_READ {
+                        result.errors.push("[Additional errors truncated]".to_string());
+                    }
                     had_failure = true;
                 }
             }
