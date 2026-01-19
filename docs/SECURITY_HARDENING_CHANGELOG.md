@@ -1,7 +1,7 @@
 # Edge-Agent Security Hardening Changelog
 
 **Date**: 2026-01-19
-**Version**: 1.3.0
+**Version**: 1.3.1
 **Author**: Claude Code
 
 ---
@@ -1802,6 +1802,112 @@ if host_port.starts_with('[') {
 - `commands.rs`: Removed unused `PlcProgrammingConfig`
 
 **Impact**: Clean compilation without warnings
+
+---
+
+## PHASE 18: Memory Exhaustion Prevention
+
+**Date**: 2026-01-19
+**Version**: 1.3.1
+
+### 18.1 S7comm TPKT Length Underflow
+**File**: `src/plc_programming/s7comm.rs:333-340`
+**Severity**: CRITICAL (DoS/Memory Corruption)
+**Issue**: TPKT length subtraction without bounds check causes underflow
+
+```rust
+// Before (VULNERABLE - can underflow!)
+let length = ((tpkt_header[2] as usize) << 8 | tpkt_header[3] as usize) - 4;
+let mut response = vec![0u8; length];
+
+// After (SAFE)
+let total_length = ((tpkt_header[2] as usize) << 8) | (tpkt_header[3] as usize);
+if total_length < 4 {
+    return Err(anyhow!("Invalid TPKT length: {} (minimum is 4)", total_length));
+}
+if total_length > MAX_S7_PACKET_SIZE {
+    return Err(anyhow!("TPKT packet too large: {} bytes", total_length));
+}
+let length = total_length - 4;
+```
+
+**Impact**: Prevents memory exhaustion attack via malicious TPKT headers
+
+---
+
+### 18.2 S7comm Maximum Packet Size Check
+**File**: `src/plc_programming/s7comm.rs:40-41`
+**Severity**: HIGH (DoS)
+**Issue**: No upper bound on packet allocation from network data
+
+**Fix**: Added `MAX_S7_PACKET_SIZE` constant (65536 bytes) and validation
+
+**Impact**: Prevents DoS via oversized packet headers
+
+---
+
+### 18.3 Codesys Payload Length Validation
+**File**: `src/plc_programming/codesys.rs:300-307`
+**Severity**: HIGH (DoS)
+**Issue**: `payload_len` from network used directly for allocation
+
+```rust
+// Before (VULNERABLE)
+let payload_len = u32::from_le_bytes([header[12], header[13], header[14], header[15]]) as usize;
+let mut response_payload = vec![0u8; payload_len];
+
+// After (SAFE)
+let payload_len = u32::from_le_bytes([header[12], header[13], header[14], header[15]]) as usize;
+if payload_len > MAX_PACKET_SIZE {
+    return Err(anyhow!("Payload length {} exceeds maximum {}", payload_len, MAX_PACKET_SIZE));
+}
+let mut response_payload = vec![0u8; payload_len];
+```
+
+**Impact**: Prevents memory exhaustion via malicious Codesys responses
+
+---
+
+### 18.4 ADS/AMS Packet Size Validation
+**File**: `src/plc_programming/ads.rs:46-47, 355-365`
+**Severity**: HIGH (DoS)
+**Issue**: `ams_length` (u32) from network used directly for allocation
+
+**Fix**: Added `MAX_AMS_PACKET_SIZE` constant (1MB) and validation:
+```rust
+// Added constant
+const MAX_AMS_PACKET_SIZE: usize = 1024 * 1024; // 1MB
+
+// Added validation
+if ams_length > MAX_AMS_PACKET_SIZE {
+    return Err(anyhow!("AMS packet too large: {} bytes (max {})", ams_length, MAX_AMS_PACKET_SIZE));
+}
+```
+
+**Impact**: Prevents DoS via malicious AMS headers
+
+---
+
+## v1.3.1 Files Modified
+
+| File | Changes |
+|------|---------|
+| `src/plc_programming/s7comm.rs` | TPKT underflow fix, max packet size validation |
+| `src/plc_programming/codesys.rs` | Payload length validation |
+| `src/plc_programming/ads.rs` | AMS packet size validation |
+
+---
+
+## v1.3.1 Security Impact Summary
+
+| Issue | Severity | Status |
+|-------|----------|--------|
+| S7comm TPKT underflow | CRITICAL | Fixed |
+| S7comm max packet size | HIGH | Fixed |
+| Codesys payload validation | HIGH | Fixed |
+| ADS packet size validation | HIGH | Fixed |
+
+**Total: 4 memory exhaustion vulnerabilities fixed in v1.3.1**
 
 ---
 
