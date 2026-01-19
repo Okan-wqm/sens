@@ -8,8 +8,8 @@
 //! # Thread Safety
 //! Uses atomic operations for lock-free, concurrent access.
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 // Monotonic time anchor (NTP-safe)

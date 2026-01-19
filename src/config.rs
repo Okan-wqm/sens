@@ -771,7 +771,6 @@ pub enum ByteOrder {
     LittleEndianByteSwap,
 }
 
-
 /// Modbus register configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModbusRegisterConfig {

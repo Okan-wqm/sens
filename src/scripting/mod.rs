@@ -54,7 +54,6 @@ pub enum ExecutionMode {
     ScanCycle,
 }
 
-
 /// Script priority levels (v2.0)
 /// Higher values = higher priority = executes first
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -73,7 +72,6 @@ pub enum ScriptPriority {
     /// Emergency priority - absolute highest, for safety scripts
     Emergency = 255,
 }
-
 
 impl ScriptPriority {
     /// Get numeric value for comparison

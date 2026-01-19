@@ -170,7 +170,8 @@ impl I2cHandle {
     pub async fn init(&self) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.send_command(I2cCommand::Init { response: tx }).await?;
-        rx.await.map_err(|_| anyhow::anyhow!("Actor disconnected"))?
+        rx.await
+            .map_err(|_| anyhow::anyhow!("Actor disconnected"))?
     }
 
     /// Read bytes from a device register
@@ -215,7 +216,8 @@ impl I2cHandle {
             response: tx,
         })
         .await?;
-        rx.await.map_err(|_| anyhow::anyhow!("Actor disconnected"))?
+        rx.await
+            .map_err(|_| anyhow::anyhow!("Actor disconnected"))?
     }
 
     /// Read bytes directly from device (no register address)
@@ -258,7 +260,8 @@ impl I2cHandle {
             response: tx,
         })
         .await?;
-        rx.await.map_err(|_| anyhow::anyhow!("Actor disconnected"))?
+        rx.await
+            .map_err(|_| anyhow::anyhow!("Actor disconnected"))?
     }
 
     /// Scan I2C bus for devices
@@ -335,7 +338,10 @@ impl I2cActor {
     }
 
     async fn run(&mut self) {
-        info!("I2C actor started with {} devices configured", self.devices.len());
+        info!(
+            "I2C actor started with {} devices configured",
+            self.devices.len()
+        );
 
         while let Some(cmd) = self.receiver.recv().await {
             match cmd {
@@ -410,7 +416,11 @@ impl I2cActor {
                 }
                 Err(e) => {
                     error!("Failed to initialize I2C bus {}: {}", bus, e);
-                    return Err(anyhow::anyhow!("Failed to initialize I2C bus {}: {}", bus, e));
+                    return Err(anyhow::anyhow!(
+                        "Failed to initialize I2C bus {}: {}",
+                        bus,
+                        e
+                    ));
                 }
             }
         }
@@ -436,7 +446,7 @@ impl I2cActor {
                     data: vec![],
                     success: false,
                     error: Some(format!("Device '{}' not found", device)),
-                }
+                };
             }
         };
 
@@ -450,7 +460,7 @@ impl I2cActor {
                     data: vec![],
                     success: false,
                     error: Some(format!("I2C bus {} not initialized", config.bus)),
-                }
+                };
             }
         };
 
@@ -469,7 +479,10 @@ impl I2cActor {
         let mut buffer = vec![0u8; length];
         match i2c.block_read(register, &mut buffer) {
             Ok(_) => {
-                debug!("I2C read from '{}' reg 0x{:02X}: {:02X?}", device, register, buffer);
+                debug!(
+                    "I2C read from '{}' reg 0x{:02X}: {:02X?}",
+                    device, register, buffer
+                );
                 I2cReadResult {
                     device: device.to_string(),
                     address: config.address,
@@ -512,17 +525,24 @@ impl I2cActor {
 
     #[cfg(all(target_os = "linux", feature = "gpio"))]
     fn write_register(&mut self, device: &str, register: u8, data: &[u8]) -> Result<()> {
-        let config = self.device_map.get(device)
+        let config = self
+            .device_map
+            .get(device)
             .ok_or_else(|| anyhow::anyhow!("Device '{}' not found", device))?
             .clone();
 
-        let i2c = self.i2c_buses.get_mut(&config.bus)
+        let i2c = self
+            .i2c_buses
+            .get_mut(&config.bus)
             .ok_or_else(|| anyhow::anyhow!("I2C bus {} not initialized", config.bus))?;
 
         i2c.set_slave_address(config.address as u16)?;
         i2c.block_write(register, data)?;
 
-        debug!("I2C write to '{}' reg 0x{:02X}: {:02X?}", device, register, data);
+        debug!(
+            "I2C write to '{}' reg 0x{:02X}: {:02X?}",
+            device, register, data
+        );
         Ok(())
     }
 
@@ -547,7 +567,7 @@ impl I2cActor {
                     data: vec![],
                     success: false,
                     error: Some(format!("Device '{}' not found", device)),
-                }
+                };
             }
         };
 
@@ -561,7 +581,7 @@ impl I2cActor {
                     data: vec![],
                     success: false,
                     error: Some(format!("I2C bus {} not initialized", config.bus)),
-                }
+                };
             }
         };
 
@@ -614,11 +634,15 @@ impl I2cActor {
 
     #[cfg(all(target_os = "linux", feature = "gpio"))]
     fn write_direct(&mut self, device: &str, data: &[u8]) -> Result<()> {
-        let config = self.device_map.get(device)
+        let config = self
+            .device_map
+            .get(device)
             .ok_or_else(|| anyhow::anyhow!("Device '{}' not found", device))?
             .clone();
 
-        let i2c = self.i2c_buses.get_mut(&config.bus)
+        let i2c = self
+            .i2c_buses
+            .get_mut(&config.bus)
             .ok_or_else(|| anyhow::anyhow!("I2C bus {} not initialized", config.bus))?;
 
         i2c.set_slave_address(config.address as u16)?;

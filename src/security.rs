@@ -316,15 +316,13 @@ pub fn check_certificate_expiry(cert_path: &str) -> CertificateExpiry {
                 error: Some(format!("openssl error: {}", stderr.trim())),
             }
         }
-        Err(e) => {
-            CertificateExpiry {
-                path: cert_path.to_string(),
-                expiry_date: None,
-                days_remaining: None,
-                status: CertExpiryStatus::Unknown,
-                error: Some(format!("Failed to run openssl: {}", e)),
-            }
-        }
+        Err(e) => CertificateExpiry {
+            path: cert_path.to_string(),
+            expiry_date: None,
+            days_remaining: None,
+            status: CertExpiryStatus::Unknown,
+            error: Some(format!("Failed to run openssl: {}", e)),
+        },
     }
 }
 
@@ -388,9 +386,9 @@ fn parse_openssl_enddate(output: &str, cert_path: &str) -> CertificateExpiry {
 fn parse_openssl_date(date_str: &str) -> Option<DateTime<Utc>> {
     // Try multiple formats that openssl might output
     let formats = [
-        "%b %d %H:%M:%S %Y GMT",     // Mar 15 12:00:00 2025 GMT
-        "%b  %d %H:%M:%S %Y GMT",    // Mar  5 12:00:00 2025 GMT (single digit day)
-        "%B %d %H:%M:%S %Y GMT",     // March 15 12:00:00 2025 GMT
+        "%b %d %H:%M:%S %Y GMT",  // Mar 15 12:00:00 2025 GMT
+        "%b  %d %H:%M:%S %Y GMT", // Mar  5 12:00:00 2025 GMT (single digit day)
+        "%B %d %H:%M:%S %Y GMT",  // March 15 12:00:00 2025 GMT
     ];
 
     let trimmed = date_str.trim();

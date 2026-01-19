@@ -14,7 +14,7 @@ use serde_json::Value;
 use tracing::{debug, info, warn};
 
 use super::function_blocks::{
-    FunctionBlock, CTD, CTU, CTUD, F_TRIG, HYSTERESIS, MAVG, PID, R_TRIG, RS, SR, TOF, TON, TP,
+    CTD, CTU, CTUD, F_TRIG, FunctionBlock, HYSTERESIS, MAVG, PID, R_TRIG, RS, SR, TOF, TON, TP,
 };
 use super::persistence::{FBState, FunctionBlockStore, SqlitePersistence};
 
@@ -469,7 +469,18 @@ mod tests {
         // v1.2.3: Added RS and SR flip-flops
         // v1.2.4: Added PID, MAVG, HYSTERESIS controllers
         let types = [
-            "TON", "TOF", "TP", "CTU", "CTD", "CTUD", "R_TRIG", "F_TRIG", "RS", "SR", "PID", "MAVG",
+            "TON",
+            "TOF",
+            "TP",
+            "CTU",
+            "CTD",
+            "CTUD",
+            "R_TRIG",
+            "F_TRIG",
+            "RS",
+            "SR",
+            "PID",
+            "MAVG",
             "HYSTERESIS",
         ];
 
@@ -570,7 +581,10 @@ mod tests {
         assert!(out.is_some());
         if let Some(Value::Number(n)) = out {
             let val = n.as_f64().unwrap();
-            assert!(val > 0.0, "PID should produce positive output for positive error");
+            assert!(
+                val > 0.0,
+                "PID should produce positive output for positive error"
+            );
         }
     }
 
@@ -605,7 +619,10 @@ mod tests {
         assert!(out.is_some());
         if let Some(Value::Number(n)) = out {
             let val = n.as_f64().unwrap();
-            assert!((val - 20.0).abs() < 0.001, "MAVG(3) of [10,20,30] should be 20.0");
+            assert!(
+                (val - 20.0).abs() < 0.001,
+                "MAVG(3) of [10,20,30] should be 20.0"
+            );
         }
     }
 

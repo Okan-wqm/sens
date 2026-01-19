@@ -23,7 +23,10 @@ fn measure_memory<F: FnOnce()>(name: &str, op: F) -> u64 {
     op();
     let after = get_memory_kb();
     let delta = after.saturating_sub(before);
-    println!("  {}: {} KB -> {} KB (delta: {} KB)", name, before, after, delta);
+    println!(
+        "  {}: {} KB -> {} KB (delta: {} KB)",
+        name, before, after, delta
+    );
     delta
 }
 
@@ -34,7 +37,11 @@ fn resource_benchmark_baseline() {
 
     // 1. Baseline memory
     let baseline = get_memory_kb();
-    println!("1. BASELINE MEMORY: {} KB ({:.1} MB)\n", baseline, baseline as f64 / 1024.0);
+    println!(
+        "1. BASELINE MEMORY: {} KB ({:.1} MB)\n",
+        baseline,
+        baseline as f64 / 1024.0
+    );
 
     // 2. Tokio runtime
     println!("2. TOKIO RUNTIME:");
@@ -44,8 +51,11 @@ fn resource_benchmark_baseline() {
         .build()
         .unwrap();
     let after_tokio = get_memory_kb();
-    println!("   After tokio::Runtime: {} KB (delta: {} KB)\n",
-        after_tokio, after_tokio.saturating_sub(baseline));
+    println!(
+        "   After tokio::Runtime: {} KB (delta: {} KB)\n",
+        after_tokio,
+        after_tokio.saturating_sub(baseline)
+    );
 
     // 3. Channel allocations
     println!("3. BOUNDED CHANNELS:");
@@ -110,7 +120,11 @@ fn resource_benchmark_baseline() {
     // 7. Final summary
     let final_mem = get_memory_kb();
     println!("==========================================");
-    println!("FINAL MEMORY: {} KB ({:.1} MB)", final_mem, final_mem as f64 / 1024.0);
+    println!(
+        "FINAL MEMORY: {} KB ({:.1} MB)",
+        final_mem,
+        final_mem as f64 / 1024.0
+    );
     println!("TOTAL GROWTH: {} KB", final_mem.saturating_sub(baseline));
     println!("==========================================\n");
 }
@@ -137,7 +151,11 @@ async fn resource_benchmark_async_workload() {
         .collect();
 
     let after_spawn = get_memory_kb();
-    println!("   After spawn: {} KB (delta: {} KB)", after_spawn, after_spawn.saturating_sub(before));
+    println!(
+        "   After spawn: {} KB (delta: {} KB)",
+        after_spawn,
+        after_spawn.saturating_sub(before)
+    );
 
     // Wait for completion
     for handle in handles {
@@ -145,8 +163,11 @@ async fn resource_benchmark_async_workload() {
     }
 
     let after_complete = get_memory_kb();
-    println!("   After complete: {} KB (delta from spawn: {} KB)\n",
-        after_complete, after_complete.saturating_sub(after_spawn));
+    println!(
+        "   After complete: {} KB (delta from spawn: {} KB)\n",
+        after_complete,
+        after_complete.saturating_sub(after_spawn)
+    );
 
     // Simulate message passing
     println!("2. MESSAGE PASSING (10000 messages through channel):");
@@ -173,13 +194,23 @@ async fn resource_benchmark_async_workload() {
     let elapsed = start.elapsed();
 
     println!("   Processed {} messages in {:?}", count, elapsed);
-    println!("   Throughput: {} msg/sec\n", (count as f64 / elapsed.as_secs_f64()) as u64);
+    println!(
+        "   Throughput: {} msg/sec\n",
+        (count as f64 / elapsed.as_secs_f64()) as u64
+    );
 
     // Final memory
     let final_mem = get_memory_kb();
     println!("==========================================");
-    println!("FINAL MEMORY: {} KB ({:.1} MB)", final_mem, final_mem as f64 / 1024.0);
-    println!("GROWTH FROM BASELINE: {} KB", final_mem.saturating_sub(baseline));
+    println!(
+        "FINAL MEMORY: {} KB ({:.1} MB)",
+        final_mem,
+        final_mem as f64 / 1024.0
+    );
+    println!(
+        "GROWTH FROM BASELINE: {} KB",
+        final_mem.saturating_sub(baseline)
+    );
     println!("==========================================\n");
 }
 
@@ -227,8 +258,12 @@ async fn resource_benchmark_sustained_load() {
             if last_report.elapsed() >= Duration::from_secs(5) {
                 let current_mem = get_memory_kb();
                 peak_memory = peak_memory.max(current_mem);
-                println!("  [{}s] Processed: {}, Memory: {} KB",
-                    start.elapsed().as_secs(), processed, current_mem);
+                println!(
+                    "  [{}s] Processed: {}, Memory: {} KB",
+                    start.elapsed().as_secs(),
+                    processed,
+                    current_mem
+                );
                 last_report = Instant::now();
             }
         }
@@ -247,11 +282,17 @@ async fn resource_benchmark_sustained_load() {
     println!("  Duration:       {:?}", elapsed);
     println!("  Messages sent:  {}", sent);
     println!("  Messages proc:  {}", processed);
-    println!("  Throughput:     {} msg/sec", (processed as f64 / elapsed.as_secs_f64()) as u64);
+    println!(
+        "  Throughput:     {} msg/sec",
+        (processed as f64 / elapsed.as_secs_f64()) as u64
+    );
     println!("  Baseline mem:   {} KB", baseline);
     println!("  Peak memory:    {} KB", peak);
     println!("  Final memory:   {} KB", final_mem);
-    println!("  Memory growth:  {} KB", final_mem.saturating_sub(baseline));
+    println!(
+        "  Memory growth:  {} KB",
+        final_mem.saturating_sub(baseline)
+    );
     println!("==========================================\n");
 
     // Assert no significant memory leak

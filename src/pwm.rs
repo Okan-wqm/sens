@@ -157,7 +157,8 @@ impl PwmHandle {
     pub async fn init(&self) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.send_command(PwmCommand::Init { response: tx }).await?;
-        rx.await.map_err(|_| anyhow::anyhow!("Actor disconnected"))?
+        rx.await
+            .map_err(|_| anyhow::anyhow!("Actor disconnected"))?
     }
 
     /// Set duty cycle for a channel (0.0 - 1.0)
@@ -169,7 +170,8 @@ impl PwmHandle {
             response: tx,
         })
         .await?;
-        rx.await.map_err(|_| anyhow::anyhow!("Actor disconnected"))?
+        rx.await
+            .map_err(|_| anyhow::anyhow!("Actor disconnected"))?
     }
 
     /// Set frequency for a channel
@@ -181,7 +183,8 @@ impl PwmHandle {
             response: tx,
         })
         .await?;
-        rx.await.map_err(|_| anyhow::anyhow!("Actor disconnected"))?
+        rx.await
+            .map_err(|_| anyhow::anyhow!("Actor disconnected"))?
     }
 
     /// Set servo position (0.0 - 1.0)
@@ -193,7 +196,8 @@ impl PwmHandle {
             response: tx,
         })
         .await?;
-        rx.await.map_err(|_| anyhow::anyhow!("Actor disconnected"))?
+        rx.await
+            .map_err(|_| anyhow::anyhow!("Actor disconnected"))?
     }
 
     /// Enable or disable a channel
@@ -205,7 +209,8 @@ impl PwmHandle {
             response: tx,
         })
         .await?;
-        rx.await.map_err(|_| anyhow::anyhow!("Actor disconnected"))?
+        rx.await
+            .map_err(|_| anyhow::anyhow!("Actor disconnected"))?
     }
 
     /// Get all channel states
@@ -263,7 +268,10 @@ impl PwmActor {
     }
 
     async fn run(&mut self) {
-        info!("PWM actor started with {} channels configured", self.configs.len());
+        info!(
+            "PWM actor started with {} channels configured",
+            self.configs.len()
+        );
 
         while let Some(cmd) = self.receiver.recv().await {
             match cmd {
@@ -332,7 +340,13 @@ impl PwmActor {
                 };
 
                 if let Some(ch) = pwm_channel {
-                    match Pwm::with_frequency(ch, config.frequency_hz, config.initial_duty_cycle, Polarity::Normal, true) {
+                    match Pwm::with_frequency(
+                        ch,
+                        config.frequency_hz,
+                        config.initial_duty_cycle,
+                        Polarity::Normal,
+                        true,
+                    ) {
                         Ok(pwm) => {
                             info!(
                                 "Initialized hardware PWM '{}' on pin {} at {}Hz",
@@ -348,7 +362,10 @@ impl PwmActor {
                             }
                         }
                         Err(e) => {
-                            warn!("Hardware PWM failed for '{}': {}, falling back to software", config.name, e);
+                            warn!(
+                                "Hardware PWM failed for '{}': {}, falling back to software",
+                                config.name, e
+                            );
                             self.init_software_pwm(config)?
                         }
                     }
@@ -415,7 +432,9 @@ impl PwmActor {
 
     #[cfg(all(target_os = "linux", feature = "gpio"))]
     fn set_duty_cycle(&mut self, channel: &str, duty_cycle: f64) -> Result<()> {
-        let ch = self.channels.get_mut(channel)
+        let ch = self
+            .channels
+            .get_mut(channel)
             .ok_or_else(|| anyhow::anyhow!("PWM channel '{}' not found", channel))?;
 
         ch.duty_cycle = duty_cycle;
@@ -426,23 +445,35 @@ impl PwmActor {
             pin.set_pwm_frequency(ch.frequency_hz, duty_cycle)?;
         }
 
-        debug!("PWM '{}' duty cycle set to {:.2}%", channel, duty_cycle * 100.0);
+        debug!(
+            "PWM '{}' duty cycle set to {:.2}%",
+            channel,
+            duty_cycle * 100.0
+        );
         Ok(())
     }
 
     #[cfg(not(all(target_os = "linux", feature = "gpio")))]
     fn set_duty_cycle(&mut self, channel: &str, duty_cycle: f64) -> Result<()> {
-        let ch = self.channels.get_mut(channel)
+        let ch = self
+            .channels
+            .get_mut(channel)
             .ok_or_else(|| anyhow::anyhow!("PWM channel '{}' not found", channel))?;
 
         ch.duty_cycle = duty_cycle;
-        debug!("PWM '{}' duty cycle set to {:.2}% (simulated)", channel, duty_cycle * 100.0);
+        debug!(
+            "PWM '{}' duty cycle set to {:.2}% (simulated)",
+            channel,
+            duty_cycle * 100.0
+        );
         Ok(())
     }
 
     #[cfg(all(target_os = "linux", feature = "gpio"))]
     fn set_frequency(&mut self, channel: &str, frequency_hz: f64) -> Result<()> {
-        let ch = self.channels.get_mut(channel)
+        let ch = self
+            .channels
+            .get_mut(channel)
             .ok_or_else(|| anyhow::anyhow!("PWM channel '{}' not found", channel))?;
 
         ch.frequency_hz = frequency_hz;
@@ -459,11 +490,16 @@ impl PwmActor {
 
     #[cfg(not(all(target_os = "linux", feature = "gpio")))]
     fn set_frequency(&mut self, channel: &str, frequency_hz: f64) -> Result<()> {
-        let ch = self.channels.get_mut(channel)
+        let ch = self
+            .channels
+            .get_mut(channel)
             .ok_or_else(|| anyhow::anyhow!("PWM channel '{}' not found", channel))?;
 
         ch.frequency_hz = frequency_hz;
-        debug!("PWM '{}' frequency set to {}Hz (simulated)", channel, frequency_hz);
+        debug!(
+            "PWM '{}' frequency set to {}Hz (simulated)",
+            channel, frequency_hz
+        );
         Ok(())
     }
 
@@ -476,7 +512,9 @@ impl PwmActor {
 
     #[cfg(all(target_os = "linux", feature = "gpio"))]
     fn set_enabled(&mut self, channel: &str, enabled: bool) -> Result<()> {
-        let ch = self.channels.get_mut(channel)
+        let ch = self
+            .channels
+            .get_mut(channel)
             .ok_or_else(|| anyhow::anyhow!("PWM channel '{}' not found", channel))?;
 
         ch.enabled = enabled;
@@ -495,17 +533,27 @@ impl PwmActor {
             }
         }
 
-        debug!("PWM '{}' {}", channel, if enabled { "enabled" } else { "disabled" });
+        debug!(
+            "PWM '{}' {}",
+            channel,
+            if enabled { "enabled" } else { "disabled" }
+        );
         Ok(())
     }
 
     #[cfg(not(all(target_os = "linux", feature = "gpio")))]
     fn set_enabled(&mut self, channel: &str, enabled: bool) -> Result<()> {
-        let ch = self.channels.get_mut(channel)
+        let ch = self
+            .channels
+            .get_mut(channel)
             .ok_or_else(|| anyhow::anyhow!("PWM channel '{}' not found", channel))?;
 
         ch.enabled = enabled;
-        debug!("PWM '{}' {} (simulated)", channel, if enabled { "enabled" } else { "disabled" });
+        debug!(
+            "PWM '{}' {} (simulated)",
+            channel,
+            if enabled { "enabled" } else { "disabled" }
+        );
         Ok(())
     }
 

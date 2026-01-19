@@ -12,8 +12,8 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
-use crate::error::{ActivationErrorCode, AgentError};
 use crate::AppState;
+use crate::error::{ActivationErrorCode, AgentError};
 
 /// Mask a sensitive token for logging purposes (IEC 62443 SL2 FR3)
 ///

@@ -113,7 +113,6 @@ pub enum AlertLevel {
     Critical,
 }
 
-
 /// Inline condition for an action
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionCondition {

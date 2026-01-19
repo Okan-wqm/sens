@@ -13,7 +13,7 @@
 
 use super::FunctionBlock;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 // ============================================================================
 // RS - Reset-Set Flip-Flop (Reset Dominant)
@@ -126,9 +126,7 @@ impl FunctionBlock for RS {
         match name {
             "Q1" | "q1" | "Q" | "q" | "output" => Some(Value::Bool(self.q1)),
             // v1.2.3: Added Q_NOT output for IEC 61131-3 compliance
-            "Q1_NOT" | "q1_not" | "QN" | "qn" | "NOT_Q" | "not_q" => {
-                Some(Value::Bool(!self.q1))
-            }
+            "Q1_NOT" | "q1_not" | "QN" | "qn" | "NOT_Q" | "not_q" => Some(Value::Bool(!self.q1)),
             _ => None,
         }
     }
@@ -302,9 +300,7 @@ impl FunctionBlock for SR {
         match name {
             "Q1" | "q1" | "Q" | "q" | "output" => Some(Value::Bool(self.q1)),
             // v1.2.3: Added Q_NOT output for IEC 61131-3 compliance
-            "Q1_NOT" | "q1_not" | "QN" | "qn" | "NOT_Q" | "not_q" => {
-                Some(Value::Bool(!self.q1))
-            }
+            "Q1_NOT" | "q1_not" | "QN" | "qn" | "NOT_Q" | "not_q" => Some(Value::Bool(!self.q1)),
             _ => None,
         }
     }

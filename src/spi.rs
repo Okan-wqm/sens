@@ -187,7 +187,8 @@ impl SpiHandle {
     pub async fn init(&self) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.send_command(SpiCommand::Init { response: tx }).await?;
-        rx.await.map_err(|_| anyhow::anyhow!("Actor disconnected"))?
+        rx.await
+            .map_err(|_| anyhow::anyhow!("Actor disconnected"))?
     }
 
     /// Full-duplex transfer
@@ -228,7 +229,8 @@ impl SpiHandle {
             response: tx,
         })
         .await?;
-        rx.await.map_err(|_| anyhow::anyhow!("Actor disconnected"))?
+        rx.await
+            .map_err(|_| anyhow::anyhow!("Actor disconnected"))?
     }
 
     /// Read data from device
@@ -269,7 +271,8 @@ impl SpiHandle {
             response: tx,
         })
         .await?;
-        rx.await.map_err(|_| anyhow::anyhow!("Actor disconnected"))?
+        rx.await
+            .map_err(|_| anyhow::anyhow!("Actor disconnected"))?
     }
 
     /// Send command to actor (blocking until channel has space)
@@ -321,7 +324,10 @@ impl SpiActor {
     }
 
     async fn run(&mut self) {
-        info!("SPI actor started with {} devices configured", self.devices.len());
+        info!(
+            "SPI actor started with {} devices configured",
+            self.devices.len()
+        );
 
         while let Some(cmd) = self.receiver.recv().await {
             match cmd {
@@ -337,7 +343,11 @@ impl SpiActor {
                     let result = self.transfer(&device, &tx_data);
                     let _ = response.send(result);
                 }
-                SpiCommand::Write { device, data, response } => {
+                SpiCommand::Write {
+                    device,
+                    data,
+                    response,
+                } => {
                     let result = self.write(&device, &data);
                     let _ = response.send(result);
                 }
@@ -388,7 +398,10 @@ impl SpiActor {
                 1 => SlaveSelect::Ss1,
                 2 => SlaveSelect::Ss2,
                 _ => {
-                    error!("Invalid chip select {} for device '{}'", config.chip_select, name);
+                    error!(
+                        "Invalid chip select {} for device '{}'",
+                        config.chip_select, name
+                    );
                     continue;
                 }
             };
@@ -434,7 +447,7 @@ impl SpiActor {
                     rx_data: vec![],
                     success: false,
                     error: Some(format!("Device '{}' not found", device)),
-                }
+                };
             }
         };
 
@@ -447,14 +460,17 @@ impl SpiActor {
                     rx_data: vec![],
                     success: false,
                     error: Some("SPI not initialized".to_string()),
-                }
+                };
             }
         };
 
         let mut rx_data = vec![0u8; tx_data.len()];
         match spi.transfer(&mut rx_data, tx_data) {
             Ok(_) => {
-                debug!("SPI '{}' transfer: TX {:02X?} RX {:02X?}", device, tx_data, rx_data);
+                debug!(
+                    "SPI '{}' transfer: TX {:02X?} RX {:02X?}",
+                    device, tx_data, rx_data
+                );
                 SpiTransferResult {
                     device: device.to_string(),
                     tx_data: tx_data.to_vec(),
@@ -487,10 +503,14 @@ impl SpiActor {
 
     #[cfg(all(target_os = "linux", feature = "gpio"))]
     fn write(&mut self, device: &str, data: &[u8]) -> Result<()> {
-        let internal = self.device_map.get_mut(device)
+        let internal = self
+            .device_map
+            .get_mut(device)
             .ok_or_else(|| anyhow::anyhow!("Device '{}' not found", device))?;
 
-        let spi = internal.spi.as_mut()
+        let spi = internal
+            .spi
+            .as_mut()
             .ok_or_else(|| anyhow::anyhow!("SPI not initialized"))?;
 
         spi.write(data)?;
@@ -524,10 +544,14 @@ impl SpiActor {
 
     #[cfg(all(target_os = "linux", feature = "gpio"))]
     fn set_clock_speed(&mut self, device: &str, clock_speed_hz: u32) -> Result<()> {
-        let internal = self.device_map.get_mut(device)
+        let internal = self
+            .device_map
+            .get_mut(device)
             .ok_or_else(|| anyhow::anyhow!("Device '{}' not found", device))?;
 
-        let spi = internal.spi.as_mut()
+        let spi = internal
+            .spi
+            .as_mut()
             .ok_or_else(|| anyhow::anyhow!("SPI not initialized"))?;
 
         spi.set_clock_speed(clock_speed_hz)?;
@@ -542,7 +566,10 @@ impl SpiActor {
         if let Some(internal) = self.device_map.get_mut(device) {
             internal.config.clock_speed_hz = clock_speed_hz;
         }
-        debug!("SPI '{}' clock speed set to {}Hz (simulated)", device, clock_speed_hz);
+        debug!(
+            "SPI '{}' clock speed set to {}Hz (simulated)",
+            device, clock_speed_hz
+        );
         Ok(())
     }
 }

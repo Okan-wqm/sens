@@ -213,10 +213,7 @@ impl AlarmDefinition {
             return false;
         }
 
-        let is_active = matches!(
-            current_state,
-            AlarmState::Active | AlarmState::Acknowledged
-        );
+        let is_active = matches!(current_state, AlarmState::Active | AlarmState::Acknowledged);
 
         match self.alarm_type {
             AlarmType::High | AlarmType::HighHigh => {
@@ -418,7 +415,11 @@ impl AlarmInstance {
     }
 
     /// Shelve the alarm for a duration
-    pub fn shelve(&mut self, duration: Duration, operator: impl Into<String>) -> Option<AlarmEvent> {
+    pub fn shelve(
+        &mut self,
+        duration: Duration,
+        operator: impl Into<String>,
+    ) -> Option<AlarmEvent> {
         if matches!(self.state, AlarmState::OutOfService) {
             return None;
         }
@@ -461,10 +462,7 @@ impl AlarmInstance {
 
     /// Check if alarm needs attention
     pub fn needs_attention(&self) -> bool {
-        matches!(
-            self.state,
-            AlarmState::Active | AlarmState::ReturnedUnack
-        )
+        matches!(self.state, AlarmState::Active | AlarmState::ReturnedUnack)
     }
 }
 
@@ -738,7 +736,9 @@ impl AlarmManager {
         );
 
         self.journal.push(AlarmJournalEntry {
-            timestamp: chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
+            timestamp: chrono::Utc::now()
+                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                .to_string(),
             event,
             alarm_name,
             priority,
@@ -779,7 +779,11 @@ mod tests {
     fn test_alarm_activation() {
         let mut manager = AlarmManager::new();
 
-        manager.register(AlarmDefinition::high_limit("temp_high", "temperature", 80.0));
+        manager.register(AlarmDefinition::high_limit(
+            "temp_high",
+            "temperature",
+            80.0,
+        ));
 
         // Below threshold - no activation
         let event = manager.process_value("temp_high", 75.0);
@@ -797,7 +801,11 @@ mod tests {
     fn test_alarm_acknowledgment() {
         let mut manager = AlarmManager::new();
 
-        manager.register(AlarmDefinition::high_limit("temp_high", "temperature", 80.0));
+        manager.register(AlarmDefinition::high_limit(
+            "temp_high",
+            "temperature",
+            80.0,
+        ));
 
         // Activate
         manager.process_value("temp_high", 85.0);
@@ -815,7 +823,11 @@ mod tests {
     fn test_alarm_return_to_normal() {
         let mut manager = AlarmManager::new();
 
-        manager.register(AlarmDefinition::high_limit("temp_high", "temperature", 80.0));
+        manager.register(AlarmDefinition::high_limit(
+            "temp_high",
+            "temperature",
+            80.0,
+        ));
 
         // Activate
         manager.process_value("temp_high", 85.0);
@@ -860,7 +872,11 @@ mod tests {
     fn test_alarm_shelving() {
         let mut manager = AlarmManager::new();
 
-        manager.register(AlarmDefinition::high_limit("temp_high", "temperature", 80.0));
+        manager.register(AlarmDefinition::high_limit(
+            "temp_high",
+            "temperature",
+            80.0,
+        ));
 
         // Shelve
         let event = manager.shelve("temp_high", Duration::from_secs(3600), "operator1");
@@ -898,10 +914,12 @@ mod tests {
         let mut manager = AlarmManager::new();
 
         manager.register(
-            AlarmDefinition::high_limit("crit1", "temp", 100.0).with_priority(AlarmPriority::Critical),
+            AlarmDefinition::high_limit("crit1", "temp", 100.0)
+                .with_priority(AlarmPriority::Critical),
         );
         manager.register(
-            AlarmDefinition::high_limit("high1", "pressure", 50.0).with_priority(AlarmPriority::High),
+            AlarmDefinition::high_limit("high1", "pressure", 50.0)
+                .with_priority(AlarmPriority::High),
         );
         manager.register(AlarmDefinition::high_limit("med1", "level", 80.0));
 

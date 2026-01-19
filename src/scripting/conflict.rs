@@ -116,7 +116,13 @@ impl ConflictDetector {
                 // Current script has HIGHER priority - it wins
                 let message = format!(
                     "GPIO CONFLICT WON: Pin {} - Script '{}' (priority {}) overrides '{}' (priority {}): {} -> {}",
-                    pin, script_id, priority, existing.script_id, existing.priority, conflict_value, new_value
+                    pin,
+                    script_id,
+                    priority,
+                    existing.script_id,
+                    existing.priority,
+                    conflict_value,
+                    new_value
                 );
                 warn!("{}", message);
                 self.gpio_writes.insert(pin, new_write);
@@ -182,7 +188,14 @@ impl ConflictDetector {
             if priority > existing.priority {
                 let message = format!(
                     "MODBUS CONFLICT WON: {}:{} - Script '{}' (priority {}) overrides '{}' (priority {}): {} -> {}",
-                    device, address, script_id, priority, existing.script_id, existing.priority, existing_val, value
+                    device,
+                    address,
+                    script_id,
+                    priority,
+                    existing.script_id,
+                    existing.priority,
+                    existing_val,
+                    value
                 );
                 warn!("{}", message);
                 self.modbus_writes.insert(key, new_write);
@@ -190,7 +203,13 @@ impl ConflictDetector {
             } else if priority < existing.priority {
                 let message = format!(
                     "MODBUS CONFLICT LOST: {}:{} - Script '{}' (priority {}) blocked by '{}' (priority {}): keeping {}",
-                    device, address, script_id, priority, existing.script_id, existing.priority, existing_val
+                    device,
+                    address,
+                    script_id,
+                    priority,
+                    existing.script_id,
+                    existing.priority,
+                    existing_val
                 );
                 warn!("{}", message);
                 return ConflictResult::ConflictLost { message };
@@ -244,7 +263,14 @@ impl ConflictDetector {
             if priority > existing.priority {
                 let message = format!(
                     "COIL CONFLICT WON: {}:{} - Script '{}' (priority {}) overrides '{}' (priority {}): {} -> {}",
-                    device, address, script_id, priority, existing.script_id, existing.priority, existing_val, value
+                    device,
+                    address,
+                    script_id,
+                    priority,
+                    existing.script_id,
+                    existing.priority,
+                    existing_val,
+                    value
                 );
                 warn!("{}", message);
                 self.coil_writes.insert(key, new_write);
@@ -252,7 +278,13 @@ impl ConflictDetector {
             } else if priority < existing.priority {
                 let message = format!(
                     "COIL CONFLICT LOST: {}:{} - Script '{}' (priority {}) blocked by '{}' (priority {}): keeping {}",
-                    device, address, script_id, priority, existing.script_id, existing.priority, existing_val
+                    device,
+                    address,
+                    script_id,
+                    priority,
+                    existing.script_id,
+                    existing.priority,
+                    existing_val
                 );
                 warn!("{}", message);
                 return ConflictResult::ConflictLost { message };

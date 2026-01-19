@@ -147,8 +147,9 @@ impl BackupManager {
         };
 
         // Serialize to JSON
-        let json = serde_json::to_string_pretty(&contents)
-            .map_err(|e| BackupError::Serialization(format!("Failed to serialize backup: {}", e)))?;
+        let json = serde_json::to_string_pretty(&contents).map_err(|e| {
+            BackupError::Serialization(format!("Failed to serialize backup: {}", e))
+        })?;
 
         // Compress with gzip
         let compressed = Self::compress(json.as_bytes())?;
@@ -213,7 +214,9 @@ impl BackupManager {
             .map_err(|e| BackupError::Io(format!("Failed to read magic header: {}", e)))?;
 
         if &magic != BACKUP_MAGIC {
-            return Err(BackupError::InvalidFormat("Invalid backup file magic".into()));
+            return Err(BackupError::InvalidFormat(
+                "Invalid backup file magic".into(),
+            ));
         }
 
         // Read version
@@ -283,7 +286,10 @@ impl BackupManager {
     }
 
     /// Get information about a specific backup
-    pub fn get_backup_info(&self, backup_path: impl AsRef<Path>) -> Result<BackupInfo, BackupError> {
+    pub fn get_backup_info(
+        &self,
+        backup_path: impl AsRef<Path>,
+    ) -> Result<BackupInfo, BackupError> {
         let backup_path = backup_path.as_ref();
 
         let metadata = fs::metadata(backup_path)
@@ -345,8 +351,8 @@ impl BackupManager {
 
     /// Compress data using gzip
     fn compress(data: &[u8]) -> Result<Vec<u8>, BackupError> {
-        use flate2::write::GzEncoder;
         use flate2::Compression;
+        use flate2::write::GzEncoder;
 
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder
@@ -435,10 +441,18 @@ impl std::fmt::Display for BackupError {
             BackupError::InvalidFormat(msg) => write!(f, "Invalid backup format: {}", msg),
             BackupError::UnsupportedVersion(v) => write!(f, "Unsupported backup version: {}", v),
             BackupError::TooLarge(size) => {
-                write!(f, "Backup file too large: {} bytes (max {})", size, MAX_BACKUP_SIZE)
+                write!(
+                    f,
+                    "Backup file too large: {} bytes (max {})",
+                    size, MAX_BACKUP_SIZE
+                )
             }
             BackupError::DeviceMismatch { expected, found } => {
-                write!(f, "Device ID mismatch: expected {}, found {}", expected, found)
+                write!(
+                    f,
+                    "Device ID mismatch: expected {}, found {}",
+                    expected, found
+                )
             }
         }
     }

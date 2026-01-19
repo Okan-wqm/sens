@@ -20,7 +20,7 @@
 #![allow(dead_code)]
 
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
@@ -61,7 +61,6 @@ pub enum MessagePriority {
     /// Critical priority - alarms, safety events
     Critical = 3,
 }
-
 
 impl From<u8> for MessagePriority {
     fn from(value: u8) -> Self {
@@ -697,18 +696,20 @@ impl OfflineQueue {
     /// queue.backup_to("/var/backups/offline_queue_2024-01-15.db")?;
     /// ```
     pub fn backup_to(&self, backup_path: &str) -> Result<u64> {
-        let conn = self.conn.lock().map_err(|e| {
-            anyhow::anyhow!("Failed to lock database connection: {}", e)
-        })?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Failed to lock database connection: {}", e))?;
 
         // VACUUM INTO creates an atomic backup
-        conn.execute(&format!("VACUUM INTO '{}'", backup_path.replace('\'', "''")), [])
-            .with_context(|| format!("Failed to backup database to {}", backup_path))?;
+        conn.execute(
+            &format!("VACUUM INTO '{}'", backup_path.replace('\'', "''")),
+            [],
+        )
+        .with_context(|| format!("Failed to backup database to {}", backup_path))?;
 
         // Get backup file size
-        let backup_size = std::fs::metadata(backup_path)
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let backup_size = std::fs::metadata(backup_path).map(|m| m.len()).unwrap_or(0);
 
         info!(
             backup_path = %backup_path,
@@ -760,18 +761,18 @@ impl OfflineQueue {
         let mut backups: Vec<_> = fs::read_dir(backup_dir)?
             .filter_map(|entry| entry.ok())
             .filter(|entry| {
-                entry.file_name()
+                entry
+                    .file_name()
                     .to_string_lossy()
                     .starts_with("offline_queue_")
-                    && entry.file_name()
-                        .to_string_lossy()
-                        .ends_with(".db")
+                    && entry.file_name().to_string_lossy().ends_with(".db")
             })
             .collect();
 
         // Sort by modified time (oldest first)
         backups.sort_by_key(|entry| {
-            entry.metadata()
+            entry
+                .metadata()
                 .and_then(|m| m.modified())
                 .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
         });
@@ -801,9 +802,10 @@ impl OfflineQueue {
     /// Run this periodically (e.g., daily or on startup) to detect corruption early.
     /// If corruption is detected, restore from backup and investigate root cause.
     pub fn integrity_check(&self) -> Result<IntegrityCheckResult> {
-        let conn = self.conn.lock().map_err(|e| {
-            anyhow::anyhow!("Failed to lock database connection: {}", e)
-        })?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Failed to lock database connection: {}", e))?;
 
         let mut stmt = conn.prepare("PRAGMA integrity_check")?;
         let results: Vec<String> = stmt
@@ -836,11 +838,13 @@ impl OfflineQueue {
     /// Faster than full integrity_check but less thorough.
     /// Good for frequent checks (e.g., after each restart).
     pub fn quick_check(&self) -> Result<bool> {
-        let conn = self.conn.lock().map_err(|e| {
-            anyhow::anyhow!("Failed to lock database connection: {}", e)
-        })?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Failed to lock database connection: {}", e))?;
 
-        let result: String = conn.query_row("PRAGMA quick_check", [], |row: &rusqlite::Row| row.get(0))?;
+        let result: String =
+            conn.query_row("PRAGMA quick_check", [], |row: &rusqlite::Row| row.get(0))?;
         Ok(result == "ok")
     }
 }
@@ -1018,7 +1022,11 @@ impl AsyncOfflineQueue {
     }
 
     /// Async rolling backup with automatic cleanup
-    pub async fn backup_rolling_async(&self, backup_dir: String, max_backups: usize) -> Result<String> {
+    pub async fn backup_rolling_async(
+        &self,
+        backup_dir: String,
+        max_backups: usize,
+    ) -> Result<String> {
         let queue = self.inner.clone();
 
         tokio::task::spawn_blocking(move || queue.backup_rolling(&backup_dir, max_backups))

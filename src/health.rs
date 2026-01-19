@@ -21,8 +21,8 @@
 
 use serde::Serialize;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tracing::{error, info};
 
@@ -401,12 +401,16 @@ impl HealthState {
 
     /// Increment offline messages queued (v1.2.4)
     pub fn inc_offline_queued(&self) {
-        self.inner.offline_total_queued.fetch_add(1, Ordering::Relaxed);
+        self.inner
+            .offline_total_queued
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     /// Increment offline messages sent (v1.2.4)
     pub fn inc_offline_sent(&self) {
-        self.inner.offline_total_sent.fetch_add(1, Ordering::Relaxed);
+        self.inner
+            .offline_total_sent
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     /// Add an error to the recent errors buffer (v1.2.4)
@@ -620,7 +624,7 @@ pub async fn start_health_server(
     state: HealthState,
 ) -> tokio::task::JoinHandle<()> {
     use axum::{
-        extract::State, http::StatusCode, response::IntoResponse, routing::get, Json, Router,
+        Json, Router, extract::State, http::StatusCode, response::IntoResponse, routing::get,
     };
 
     // Build the router

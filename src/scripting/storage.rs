@@ -10,7 +10,7 @@
 //! Uses `tokio::sync::RwLock` for concurrent access from multiple async tasks.
 //! All public methods are now async to support lock acquisition.
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

@@ -13,7 +13,7 @@
 //!
 //! v2.2.0: Fixed async/sync Mutex deadlock risk by using spawn_blocking
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::Path;
@@ -132,7 +132,6 @@ pub enum VariableScope {
     /// Persistent variable - same as Retain (alias)
     Persistent,
 }
-
 
 /// Stored variable with metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -15,7 +15,7 @@
 
 use super::FunctionBlock;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::VecDeque;
 
 /// PID Controller Function Block (IEC 61131-3)
@@ -44,24 +44,24 @@ use std::collections::VecDeque;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PID {
     // Inputs
-    sp: f64,         // Setpoint
-    pv: f64,         // Process variable
-    kp: f64,         // Proportional gain
-    ki: f64,         // Integral gain
-    kd: f64,         // Derivative gain
-    out_min: f64,    // Output minimum
-    out_max: f64,    // Output maximum
-    manual: bool,    // Manual mode
-    man_out: f64,    // Manual output
-    reset: bool,     // Reset integrator
+    sp: f64,      // Setpoint
+    pv: f64,      // Process variable
+    kp: f64,      // Proportional gain
+    ki: f64,      // Integral gain
+    kd: f64,      // Derivative gain
+    out_min: f64, // Output minimum
+    out_max: f64, // Output maximum
+    manual: bool, // Manual mode
+    man_out: f64, // Manual output
+    reset: bool,  // Reset integrator
 
     // Internal state
-    integral: f64,       // Integral accumulator
-    prev_error: f64,     // Previous error for derivative
-    prev_pv: f64,        // Previous PV (for derivative on PV)
-    last_output: f64,    // Last output value
-    saturated: bool,     // Output saturation flag
-    first_run: bool,     // First execution flag
+    integral: f64,    // Integral accumulator
+    prev_error: f64,  // Previous error for derivative
+    prev_pv: f64,     // Previous PV (for derivative on PV)
+    last_output: f64, // Last output value
+    saturated: bool,  // Output saturation flag
+    first_run: bool,  // First execution flag
 
     // Timing
     sample_time_ms: u64, // Sample time in milliseconds

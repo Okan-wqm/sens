@@ -13,7 +13,7 @@
 //! - Deterministic execution timing
 
 use chrono::Utc;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
@@ -29,9 +29,9 @@ use super::{
 use std::fs;
 use std::path::PathBuf;
 
+use crate::AppState;
 use crate::commands::{ProgramDefinition, ProgramState};
 use crate::gpio::PinState;
-use crate::AppState;
 
 /// Script execution result
 #[derive(Debug, Clone)]
@@ -719,7 +719,10 @@ impl ScriptEngine {
                     match self.context.get_sensor(source_path) {
                         Some(v) => Some(json!(v)),
                         None => {
-                            warn!("FB '{}' input '{}': sensor '{}' not found", fb_id, input_name, source_path);
+                            warn!(
+                                "FB '{}' input '{}': sensor '{}' not found",
+                                fb_id, input_name, source_path
+                            );
                             None
                         }
                     }
@@ -728,12 +731,18 @@ impl ScriptEngine {
                         Ok(pin) => match self.context.get_gpio(pin) {
                             Some(v) => Some(json!(v)),
                             None => {
-                                warn!("FB '{}' input '{}': GPIO pin {} not available", fb_id, input_name, pin);
+                                warn!(
+                                    "FB '{}' input '{}': GPIO pin {} not available",
+                                    fb_id, input_name, pin
+                                );
                                 None
                             }
                         },
                         Err(_) => {
-                            warn!("FB '{}' input '{}': invalid GPIO pin '{}' (must be 0-255)", fb_id, input_name, pin_str);
+                            warn!(
+                                "FB '{}' input '{}': invalid GPIO pin '{}' (must be 0-255)",
+                                fb_id, input_name, pin_str
+                            );
                             None
                         }
                     }
@@ -742,7 +751,10 @@ impl ScriptEngine {
                         Some(v) => Some(v.clone()),
                         None => {
                             // Variables may not exist yet, this is often normal
-                            debug!("FB '{}' input '{}': variable '{}' not set", fb_id, input_name, var_name);
+                            debug!(
+                                "FB '{}' input '{}': variable '{}' not set",
+                                fb_id, input_name, var_name
+                            );
                             None
                         }
                     }
@@ -752,12 +764,18 @@ impl ScriptEngine {
                         match self.fb_registry.get_output(other_fb, output_name) {
                             Some(v) => Some(v),
                             None => {
-                                debug!("FB '{}' input '{}': FB output '{}' not available yet", fb_id, input_name, fb_ref);
+                                debug!(
+                                    "FB '{}' input '{}': FB output '{}' not available yet",
+                                    fb_id, input_name, fb_ref
+                                );
                                 None
                             }
                         }
                     } else {
-                        warn!("FB '{}' input '{}': invalid FB reference '{}' (expected 'fb:id.output')", fb_id, input_name, fb_ref);
+                        warn!(
+                            "FB '{}' input '{}': invalid FB reference '{}' (expected 'fb:id.output')",
+                            fb_id, input_name, fb_ref
+                        );
                         None
                     }
                 } else {
@@ -765,7 +783,10 @@ impl ScriptEngine {
                     match serde_json::from_str(source) {
                         Ok(v) => Some(v),
                         Err(_) => {
-                            warn!("FB '{}' input '{}': invalid literal value '{}'", fb_id, input_name, source);
+                            warn!(
+                                "FB '{}' input '{}': invalid literal value '{}'",
+                                fb_id, input_name, source
+                            );
                             None
                         }
                     }
@@ -1302,7 +1323,7 @@ impl ScriptEngine {
         let address = match action.address {
             Some(a) => a,
             None => {
-                return ActionResult::failure(ActionType::WriteModbus, "Missing register address")
+                return ActionResult::failure(ActionType::WriteModbus, "Missing register address");
             }
         };
 
@@ -1312,10 +1333,10 @@ impl ScriptEngine {
                 return ActionResult::failure(
                     ActionType::WriteModbus,
                     format!("Value {} exceeds maximum u16 value ({})", v, u16::MAX),
-                )
+                );
             }
             None => {
-                return ActionResult::failure(ActionType::WriteModbus, "Missing or invalid value")
+                return ActionResult::failure(ActionType::WriteModbus, "Missing or invalid value");
             }
         };
 
@@ -1384,7 +1405,7 @@ impl ScriptEngine {
         let value = match action.value.as_ref().and_then(|v| v.as_bool()) {
             Some(v) => v,
             None => {
-                return ActionResult::failure(ActionType::WriteCoil, "Missing or invalid value")
+                return ActionResult::failure(ActionType::WriteCoil, "Missing or invalid value");
             }
         };
 
@@ -1642,7 +1663,10 @@ impl ScriptEngine {
 
         // Validate URL format
         if !url.starts_with("http://") && !url.starts_with("https://") {
-            return ActionResult::failure(ActionType::Webhook, "Invalid URL scheme (must be http or https)");
+            return ActionResult::failure(
+                ActionType::Webhook,
+                "Invalid URL scheme (must be http or https)",
+            );
         }
 
         let method = action.method.as_deref().unwrap_or("POST").to_uppercase();
@@ -1666,7 +1690,12 @@ impl ScriptEngine {
                     .build()
                 {
                     Ok(c) => c,
-                    Err(e) => return ActionResult::failure(ActionType::Webhook, format!("Failed to create HTTP client: {}", e)),
+                    Err(e) => {
+                        return ActionResult::failure(
+                            ActionType::Webhook,
+                            format!("Failed to create HTTP client: {}", e),
+                        );
+                    }
                 };
                 new_client
             }
@@ -1677,18 +1706,27 @@ impl ScriptEngine {
             "POST" => {
                 let mut req = client.post(&url);
                 if let Some(ref b) = body {
-                    req = req.header("Content-Type", "application/json").body(b.to_string());
+                    req = req
+                        .header("Content-Type", "application/json")
+                        .body(b.to_string());
                 }
                 req
             }
             "PUT" => {
                 let mut req = client.put(&url);
                 if let Some(ref b) = body {
-                    req = req.header("Content-Type", "application/json").body(b.to_string());
+                    req = req
+                        .header("Content-Type", "application/json")
+                        .body(b.to_string());
                 }
                 req
             }
-            _ => return ActionResult::failure(ActionType::Webhook, format!("Unsupported HTTP method: {}", method)),
+            _ => {
+                return ActionResult::failure(
+                    ActionType::Webhook,
+                    format!("Unsupported HTTP method: {}", method),
+                );
+            }
         };
 
         match request.send().await {

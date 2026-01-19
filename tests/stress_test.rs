@@ -9,8 +9,8 @@
 //! - Throughput capacity
 //! - No resource leaks over time
 
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 /// Simulated device data point
@@ -143,7 +143,9 @@ async fn message_consumer(
 
         // Track queue depth (approximate)
         let current_depth = channel_buffer.saturating_sub(rx.capacity());
-        let _ = metrics.peak_queue_depth.fetch_max(current_depth, Ordering::Relaxed);
+        let _ = metrics
+            .peak_queue_depth
+            .fetch_max(current_depth, Ordering::Relaxed);
 
         // Simulate processing time (serialization, network I/O, etc.)
         tokio::time::sleep(process_time).await;
@@ -160,8 +162,10 @@ async fn stress_test_1000_devices() {
     println!("Duration:          {} seconds", config.duration_secs);
     println!("Readings/sec/dev:  {}", config.readings_per_sec);
     println!("Channel buffer:    {}", config.channel_buffer);
-    println!("Expected msgs:     ~{}",
-        config.device_count as u64 * config.duration_secs * config.readings_per_sec as u64);
+    println!(
+        "Expected msgs:     ~{}",
+        config.device_count as u64 * config.duration_secs * config.readings_per_sec as u64
+    );
     println!("==========================================\n");
 
     let metrics = Arc::new(TestMetrics::new());
@@ -217,7 +221,8 @@ async fn stress_test_1000_devices() {
     assert!(
         peak_queue <= config.channel_buffer,
         "Queue depth exceeded buffer: {} > {}",
-        peak_queue, config.channel_buffer
+        peak_queue,
+        config.channel_buffer
     );
 
     // 3. System should achieve minimum throughput (at least 100 msg/sec)
@@ -271,10 +276,7 @@ async fn stress_test_memory_stability() {
     let sys = sysinfo::System::new_all();
     let pid = sysinfo::get_current_pid().unwrap();
 
-    let initial_memory = sys
-        .process(pid)
-        .map(|p| p.memory())
-        .unwrap_or(0);
+    let initial_memory = sys.process(pid).map(|p| p.memory()).unwrap_or(0);
 
     println!("\n========== MEMORY STABILITY TEST =========");
     println!("Initial memory: {} KB", initial_memory / 1024);
@@ -305,10 +307,7 @@ async fn stress_test_memory_stability() {
 
         // Check memory after each iteration
         let sys = sysinfo::System::new_all();
-        let current_memory = sys
-            .process(pid)
-            .map(|p| p.memory())
-            .unwrap_or(0);
+        let current_memory = sys.process(pid).map(|p| p.memory()).unwrap_or(0);
 
         println!(
             "Iteration {}: {} KB (delta: {} KB)",
@@ -320,16 +319,17 @@ async fn stress_test_memory_stability() {
 
     // Final check
     let sys = sysinfo::System::new_all();
-    let final_memory = sys
-        .process(pid)
-        .map(|p| p.memory())
-        .unwrap_or(0);
+    let final_memory = sys.process(pid).map(|p| p.memory()).unwrap_or(0);
 
     let memory_growth = final_memory.saturating_sub(initial_memory);
     let growth_percent = (memory_growth as f64 / initial_memory as f64) * 100.0;
 
     println!("Final memory:   {} KB", final_memory / 1024);
-    println!("Memory growth:  {} KB ({:.1}%)", memory_growth / 1024, growth_percent);
+    println!(
+        "Memory growth:  {} KB ({:.1}%)",
+        memory_growth / 1024,
+        growth_percent
+    );
     println!("==========================================\n");
 
     // Memory growth should be < 50% (some growth expected due to runtime)
@@ -442,7 +442,10 @@ async fn stress_test_concurrent_scripts() {
     println!("Total completed:  {}", total_completed);
     println!("Expected:         {}", expected);
     println!("Duration:         {:?}", elapsed);
-    println!("Throughput:       {} ops/sec", total_completed / elapsed.as_secs().max(1));
+    println!(
+        "Throughput:       {} ops/sec",
+        total_completed / elapsed.as_secs().max(1)
+    );
     println!("==========================================\n");
 
     assert_eq!(

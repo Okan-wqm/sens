@@ -11,7 +11,7 @@
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::VecDeque;
 use std::fs;
 use std::path::PathBuf;
@@ -20,10 +20,10 @@ use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
+use crate::AppState;
 use crate::mqtt::{CommandMessage, CommandResponse, IncomingMessage};
 use crate::scripting::{ExecutionMode, FBDefinition, ScriptDefinition, ScriptStorage};
 use crate::security::sanitize_for_log;
-use crate::AppState;
 
 /// Simple sliding window rate limiter
 struct RateLimiter {
@@ -168,8 +168,7 @@ fn default_scan_cycle() -> u64 {
 }
 
 /// Persisted program state (for reload after restart)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProgramState {
     /// Currently deployed program
     pub program: Option<ProgramDefinition>,
@@ -178,7 +177,6 @@ pub struct ProgramState {
     /// Previous version (for rollback)
     pub previous_version: Option<Box<ProgramDefinition>>,
 }
-
 
 // ============================================================================
 // Command Handler
@@ -514,7 +512,7 @@ impl CommandHandler {
                     false,
                     json!(null),
                     Some("Missing 'level' parameter".to_string()),
-                )
+                );
             }
         };
 
@@ -635,7 +633,7 @@ impl CommandHandler {
                     false,
                     json!(null),
                     Some("No Modbus devices configured".to_string()),
-                )
+                );
             }
         };
 
@@ -675,7 +673,7 @@ impl CommandHandler {
                     false,
                     json!(null),
                     Some("Missing 'device' parameter".to_string()),
-                )
+                );
             }
         };
 
@@ -690,14 +688,14 @@ impl CommandHandler {
                         a,
                         u16::MAX
                     )),
-                )
+                );
             }
             None => {
                 return (
                     false,
                     json!(null),
                     Some("Missing 'address' parameter".to_string()),
-                )
+                );
             }
         };
 
@@ -712,14 +710,14 @@ impl CommandHandler {
                         v,
                         u16::MAX
                     )),
-                )
+                );
             }
             None => {
                 return (
                     false,
                     json!(null),
                     Some("Missing 'value' parameter".to_string()),
-                )
+                );
             }
         };
 
@@ -736,7 +734,7 @@ impl CommandHandler {
                     false,
                     json!(null),
                     Some("No Modbus devices configured".to_string()),
-                )
+                );
             }
         };
 
@@ -773,7 +771,7 @@ impl CommandHandler {
                     false,
                     json!(null),
                     Some("No GPIO pins configured".to_string()),
-                )
+                );
             }
         };
 
@@ -812,7 +810,7 @@ impl CommandHandler {
                     false,
                     json!(null),
                     Some("Missing 'pin' parameter".to_string()),
-                )
+                );
             }
         };
 
@@ -823,7 +821,7 @@ impl CommandHandler {
                     false,
                     json!(null),
                     Some("Missing 'state' parameter (high/low)".to_string()),
-                )
+                );
             }
         };
 
@@ -836,7 +834,7 @@ impl CommandHandler {
                     false,
                     json!(null),
                     Some("Invalid state. Use 'high' or 'low'".to_string()),
-                )
+                );
             }
         };
 
@@ -853,7 +851,7 @@ impl CommandHandler {
                     false,
                     json!(null),
                     Some("No GPIO pins configured".to_string()),
-                )
+                );
             }
         };
 
@@ -912,7 +910,7 @@ impl CommandHandler {
                     false,
                     json!(null),
                     Some("Missing 'id' parameter".to_string()),
-                )
+                );
             }
         };
 
@@ -1004,7 +1002,7 @@ impl CommandHandler {
                     false,
                     json!(null),
                     Some("Missing 'id' parameter".to_string()),
-                )
+                );
             }
         };
 
@@ -1038,7 +1036,7 @@ impl CommandHandler {
                     false,
                     json!(null),
                     Some("Missing 'id' parameter".to_string()),
-                )
+                );
             }
         };
 
@@ -1072,7 +1070,7 @@ impl CommandHandler {
                     false,
                     json!(null),
                     Some("Missing 'id' parameter".to_string()),
-                )
+                );
             }
         };
 

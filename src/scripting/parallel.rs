@@ -52,7 +52,6 @@ pub enum SyncType {
     AllSettled,
 }
 
-
 /// Parallel branch definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParallelBranch {
@@ -400,8 +399,8 @@ where
 mod tests {
     use super::super::ActionType; // Only used in tests
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn create_test_action(id: &str) -> Action {
         Action {

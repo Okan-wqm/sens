@@ -9,11 +9,11 @@ use sysinfo::{Components, Disks, Networks, System};
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
+use crate::AppState;
 use crate::gpio::PinState;
 use crate::mqtt::{
     DeviceStatus, GpioPinData, ModbusDeviceData, ModbusRegisterData, TelemetryMetrics,
 };
-use crate::AppState;
 
 /// Telemetry collector
 pub struct TelemetryCollector {

@@ -7,7 +7,7 @@
 //! This implementation uses only atomic operations to ensure thread-safe state transitions
 //! without the overhead and potential deadlocks of mutexes.
 
-use std::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Circuit breaker states

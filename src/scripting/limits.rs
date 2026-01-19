@@ -7,8 +7,8 @@
 //! - Infinite recursion (call depth limit)
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::RwLock;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 /// Execution limits for scripts

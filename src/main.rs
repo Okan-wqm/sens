@@ -10,27 +10,27 @@
 //! - Graceful shutdown coordinator
 //! - Granular state management
 
+mod alarms; // v1.2.4: Alarm management (IEC 62682)
+mod backup; // v1.2.4: Backup and restore functionality
 mod bounded;
 mod commands;
 mod config;
 mod error;
 mod gpio;
 mod health;
+mod i2c; // v1.2.4: I2C support for sensor communication
 mod interning;
 mod modbus;
 mod mqtt;
 mod offline_queue;
 mod provisioning;
+mod pwm; // v1.2.4: PWM support for motor/servo control
 mod resilience;
 mod scripting;
 mod security; // v1.2.2: Security hardening utilities
 mod shutdown;
-mod telemetry;
-mod backup; // v1.2.4: Backup and restore functionality
-mod alarms; // v1.2.4: Alarm management (IEC 62682)
-mod pwm; // v1.2.4: PWM support for motor/servo control
-mod i2c; // v1.2.4: I2C support for sensor communication
-mod spi; // v1.2.4: SPI support for high-speed peripherals
+mod spi;
+mod telemetry; // v1.2.4: SPI support for high-speed peripherals
 
 use anyhow::{Context, Result};
 use std::sync::Arc;
@@ -64,10 +64,7 @@ fn generate_default_config() -> Result<()> {
         }
         Err(_) => {
             let default_path = "/etc/suderra/config.yaml".to_string();
-            eprintln!(
-                "SUDERRA_CONFIG not set, using default: {}",
-                default_path
-            );
+            eprintln!("SUDERRA_CONFIG not set, using default: {}", default_path);
             default_path
         }
     };
@@ -421,7 +418,7 @@ async fn async_main() -> Result<()> {
 /// Note: OpenTelemetry OTLP export is initialized separately in `init_opentelemetry()`
 /// after configuration is loaded.
 fn init_logging() {
-    use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+    use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
@@ -574,12 +571,15 @@ fn setup_shutdown_handler() -> Result<tokio::sync::watch::Receiver<bool>> {
 
         // Spawn async task to handle Unix signals
         tokio::spawn(async move {
-            use tokio::signal::unix::{signal, SignalKind};
+            use tokio::signal::unix::{SignalKind, signal};
 
             let mut sigterm = match signal(SignalKind::terminate()) {
                 Ok(s) => s,
                 Err(e) => {
-                    error!("Failed to setup SIGTERM handler: {}. SIGTERM will not trigger graceful shutdown.", e);
+                    error!(
+                        "Failed to setup SIGTERM handler: {}. SIGTERM will not trigger graceful shutdown.",
+                        e
+                    );
                     return;
                 }
             };
@@ -587,7 +587,10 @@ fn setup_shutdown_handler() -> Result<tokio::sync::watch::Receiver<bool>> {
             let mut sighup = match signal(SignalKind::hangup()) {
                 Ok(s) => s,
                 Err(e) => {
-                    error!("Failed to setup SIGHUP handler: {}. SIGHUP will not trigger graceful shutdown.", e);
+                    error!(
+                        "Failed to setup SIGHUP handler: {}. SIGHUP will not trigger graceful shutdown.",
+                        e
+                    );
                     return;
                 }
             };
