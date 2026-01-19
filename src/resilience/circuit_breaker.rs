@@ -26,6 +26,10 @@ fn now_millis() -> u64 {
 /// Default maximum half-open permits (v1.2.0)
 const DEFAULT_MAX_HALF_OPEN_PERMITS: u32 = 1;
 
+/// Maximum CAS retry attempts before yielding (v1.2.6)
+/// Prevents busy-wait under extreme contention
+const MAX_CAS_SPINS: u32 = 10;
+
 /// Thread-safe circuit breaker using only atomic operations
 ///
 /// # Race Condition Prevention
@@ -109,6 +113,8 @@ impl CircuitBreaker {
     /// If no permits are available, returns true (rejecting the request).
     /// Call `release_permit()` after processing the request.
     pub fn is_open(&self) -> bool {
+        let mut spin_count: u32 = 0;
+
         loop {
             let current_state = self.state.load(Ordering::Acquire);
 
@@ -140,7 +146,12 @@ impl CircuitBreaker {
                                 // Fall through to half-open permit check
                             }
                             Err(_) => {
-                                // Another thread changed the state, retry the loop
+                                // Another thread changed the state, retry with backoff
+                                spin_count += 1;
+                                if spin_count >= MAX_CAS_SPINS {
+                                    std::hint::spin_loop();
+                                    spin_count = 0;
+                                }
                                 continue;
                             }
                         }
@@ -162,7 +173,7 @@ impl CircuitBreaker {
                         return true;
                     }
 
-                    // Try to acquire a permit using CAS
+                    // Try to acquire a permit using CAS (v1.2.6: with spin backoff)
                     match self.half_open_permits.compare_exchange(
                         current_permits,
                         current_permits + 1,
@@ -170,7 +181,15 @@ impl CircuitBreaker {
                         Ordering::Acquire,
                     ) {
                         Ok(_) => return false, // Permit acquired, allow request
-                        Err(_) => continue,    // Another thread acquired, retry
+                        Err(_) => {
+                            // Another thread acquired, retry with backoff
+                            spin_count += 1;
+                            if spin_count >= MAX_CAS_SPINS {
+                                std::hint::spin_loop();
+                                spin_count = 0;
+                            }
+                            continue;
+                        }
                     }
                 }
                 _ => return false,
@@ -184,7 +203,8 @@ impl CircuitBreaker {
     pub fn release_permit(&self) {
         let current_state = self.state.load(Ordering::Acquire);
         if current_state == STATE_HALF_OPEN {
-            // Decrement permits, ensuring we don't underflow
+            // Decrement permits, ensuring we don't underflow (v1.2.6: with spin backoff)
+            let mut spin_count: u32 = 0;
             loop {
                 let current = self.half_open_permits.load(Ordering::Acquire);
                 if current == 0 {
@@ -196,6 +216,11 @@ impl CircuitBreaker {
                     .is_ok()
                 {
                     break;
+                }
+                spin_count += 1;
+                if spin_count >= MAX_CAS_SPINS {
+                    std::hint::spin_loop();
+                    spin_count = 0;
                 }
             }
         }

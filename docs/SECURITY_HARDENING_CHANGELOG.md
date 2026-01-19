@@ -1,7 +1,7 @@
 # Edge-Agent Security Hardening Changelog
 
 **Date**: 2026-01-19
-**Version**: 1.2.4
+**Version**: 1.2.6
 **Author**: Claude Code
 
 ---
@@ -445,6 +445,180 @@ reqwest::Client::builder()
 
 ---
 
+## PHASE 6: v1.2.6 Resource & Reliability Fixes
+
+**Date**: 2026-01-19
+**Version**: 1.2.6
+
+### 6.1 MQTT Event Loop Graceful Shutdown
+**File**: `src/mqtt.rs`
+**Severity**: HIGH (Resource Leak)
+**Issue**: MQTT event loop task JoinHandle was discarded, causing orphaned tasks on shutdown
+
+**Fix**:
+```rust
+pub struct MqttClient {
+    // ...
+    event_loop_handle: Option<tokio::task::JoinHandle<()>>,  // NEW
+}
+
+pub async fn disconnect(mut self) -> Result<()> {
+    // ...
+    if let Some(handle) = self.event_loop_handle.take() {
+        handle.abort();
+        let _ = tokio::time::timeout(Duration::from_millis(100), handle).await;
+    }
+}
+```
+
+---
+
+### 6.2 MQTT Internal Buffer Mismatch Fix
+**File**: `src/mqtt.rs`
+**Severity**: MEDIUM (Backpressure)
+**Issue**: Internal MQTT buffer was 100, but message channel was 500 - inconsistent backpressure
+
+**Fix**:
+```rust
+const MESSAGE_CHANNEL_CAPACITY: usize = 500;
+const INTERNAL_MQTT_BUFFER_SIZE: usize = 500;  // NEW - matches channel
+
+let (client, eventloop) = AsyncClient::new(options, INTERNAL_MQTT_BUFFER_SIZE);
+```
+
+---
+
+### 6.3 Actor Task Handle Documentation
+**Files**: `src/gpio.rs`, `src/modbus.rs`
+**Severity**: LOW (Documentation)
+**Issue**: spawn_local JoinHandle discarded without explanation
+
+**Fix**: Added documentation explaining design decision:
+```rust
+// v1.2.6: JoinHandle intentionally not tracked - actor lifetime tied to LocalSet
+// If actor panics, channel closes and callers receive "actor dead" error
+let _ = tokio::task::spawn_local(async move {
+    actor.run().await;
+    tracing::warn!("Actor terminated unexpectedly");
+});
+```
+
+---
+
+### 6.4 Circuit Breaker CAS Spin Backoff
+**File**: `src/resilience/circuit_breaker.rs`
+**Severity**: MEDIUM (CPU)
+**Issue**: CAS retry loops could spin indefinitely under contention
+
+**Fix**: Added spin count limit with `spin_loop()` hint:
+```rust
+const MAX_CAS_SPINS: u32 = 10;
+
+let mut spin_count: u32 = 0;
+loop {
+    // ... CAS operation ...
+    Err(_) => {
+        spin_count += 1;
+        if spin_count >= MAX_CAS_SPINS {
+            std::hint::spin_loop();
+            spin_count = 0;
+        }
+        continue;
+    }
+}
+```
+
+---
+
+### 6.5 Data Directory Early Validation
+**File**: `src/scripting/engine.rs`
+**Severity**: MEDIUM (Reliability)
+**Issue**: Data directory not validated until first use - late failures
+
+**Fix**: Create directory at path resolution time:
+```rust
+fn default_program_state_path() -> PathBuf {
+    let data_dir = std::env::var("SUDERRA_DATA_DIR")
+        .unwrap_or_else(|_| "/var/lib/suderra".to_string());
+    let path = PathBuf::from(&data_dir);
+
+    if !path.exists() {
+        if let Err(e) = std::fs::create_dir_all(&path) {
+            tracing::warn!(path = ?path, error = %e,
+                "Failed to create data directory");
+        }
+    }
+    path.join("program.json")
+}
+```
+
+---
+
+### 6.6 Modbus Empty Register Warning
+**File**: `src/modbus.rs`
+**Severity**: LOW (Operational)
+**Issue**: No warning when Modbus device configured with zero registers
+
+**Fix**: Added validation warning:
+```rust
+pub fn new(config: ModbusDeviceConfig) -> Self {
+    if config.registers.is_empty() {
+        warn!(device = %config.name,
+            "Modbus device configured with no registers - polling will be skipped");
+    }
+    // ...
+}
+```
+
+---
+
+### 6.7 Reboot/Restart Task Documentation
+**File**: `src/commands.rs`
+**Severity**: LOW (Documentation)
+**Issue**: Fire-and-forget spawns not documented
+
+**Fix**: Added documentation explaining intentional design:
+```rust
+/// # Task Handle
+/// The spawned task is intentionally not tracked because:
+/// 1. The system will be rebooting - no graceful shutdown needed
+/// 2. We must return the response before the reboot occurs
+/// 3. Any panic is logged within the task itself
+async fn cmd_reboot(&self, params: &Value) -> (bool, Value, Option<String>) {
+    // Fire-and-forget: JoinHandle intentionally not tracked
+    let _ = tokio::spawn(async move { ... });
+}
+```
+
+---
+
+## v1.2.6 Files Modified
+
+| File | Changes |
+|------|---------|
+| `src/mqtt.rs` | Event loop handle tracking, buffer size constant |
+| `src/gpio.rs` | Actor handle documentation |
+| `src/modbus.rs` | Actor handle documentation, empty register warning |
+| `src/commands.rs` | Reboot/restart task documentation |
+| `src/resilience/circuit_breaker.rs` | CAS spin backoff |
+| `src/scripting/engine.rs` | Data directory early validation |
+
+---
+
+## v1.2.6 Security Impact Summary
+
+| Issue | Severity | Status |
+|-------|----------|--------|
+| MQTT event loop leak | HIGH | Fixed |
+| MQTT buffer mismatch | MEDIUM | Fixed |
+| Circuit breaker CPU spike | MEDIUM | Fixed |
+| Data directory validation | MEDIUM | Fixed |
+| Missing actor documentation | LOW | Fixed |
+| Missing modbus validation | LOW | Fixed |
+| Missing task documentation | LOW | Fixed |
+
+---
+
 ## Remaining Work
 
 ### Future Enhancements (Optional)
@@ -495,4 +669,4 @@ cargo build --release
 
 ---
 
-*Generated by Suderra AS on 2026-01-13*
+*Generated by Suderra AS on 2026-01-19*

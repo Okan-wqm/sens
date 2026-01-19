@@ -142,10 +142,24 @@ const MIN_SCAN_CYCLE_MS: u64 = 10;
 const MAX_SCAN_CYCLE_MS: u64 = 10000;
 
 /// Get default program state path
+/// v1.2.6: Creates directory if it doesn't exist
 fn default_program_state_path() -> PathBuf {
     let data_dir =
         std::env::var("SUDERRA_DATA_DIR").unwrap_or_else(|_| "/var/lib/suderra".to_string());
-    PathBuf::from(&data_dir).join("program.json")
+    let path = PathBuf::from(&data_dir);
+
+    // Ensure data directory exists (v1.2.6: early validation)
+    if !path.exists() {
+        if let Err(e) = std::fs::create_dir_all(&path) {
+            tracing::warn!(
+                path = ?path,
+                error = %e,
+                "Failed to create data directory, program state may not persist"
+            );
+        }
+    }
+
+    path.join("program.json")
 }
 
 impl ScriptEngine {

@@ -116,9 +116,13 @@ impl ModbusHandle {
         let (sender, receiver) = mpsc::channel(32);
 
         // Spawn the actor in a local task (will be run via LocalSet)
-        tokio::task::spawn_local(async move {
+        // v1.2.6: JoinHandle intentionally not tracked - actor lifetime tied to LocalSet
+        // If actor panics, channel closes and callers receive send error
+        let _ = tokio::task::spawn_local(async move {
             let mut actor = ModbusActor::new(configs, receiver);
             actor.run().await;
+            // If we reach here, channel was closed (shouldn't happen normally)
+            tracing::warn!("Modbus actor terminated unexpectedly");
         });
 
         Self { sender }
@@ -356,6 +360,14 @@ pub struct ModbusReadResult {
 impl ModbusClient {
     /// Create a new Modbus client (not connected)
     pub fn new(config: ModbusDeviceConfig) -> Self {
+        // v1.2.6: Warn if no registers configured (wasteful resource allocation)
+        if config.registers.is_empty() {
+            warn!(
+                device = %config.name,
+                "Modbus device configured with no registers - polling will be skipped"
+            );
+        }
+
         let circuit_breaker = CircuitBreaker::new(
             format!("modbus-{}", config.name),
             CIRCUIT_BREAKER_THRESHOLD,

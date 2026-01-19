@@ -147,9 +147,13 @@ impl GpioHandle {
         let (sender, receiver) = mpsc::channel(effective_size);
 
         // Spawn the actor in a local task (for non-Send rppal types)
-        tokio::task::spawn_local(async move {
+        // v1.2.6: JoinHandle intentionally not tracked - actor lifetime tied to LocalSet
+        // If actor panics, channel closes and callers receive "actor dead" error
+        let _ = tokio::task::spawn_local(async move {
             let mut actor = GpioActor::new(configs, receiver);
             actor.run().await;
+            // If we reach here, channel was closed (shouldn't happen normally)
+            tracing::warn!("GPIO actor terminated unexpectedly");
         });
 
         Self {

@@ -421,6 +421,12 @@ impl CommandHandler {
     }
 
     /// Reboot the device
+    ///
+    /// # Task Handle
+    /// The spawned task is intentionally not tracked because:
+    /// 1. The system will be rebooting - no graceful shutdown needed
+    /// 2. We must return the response before the reboot occurs
+    /// 3. Any panic is logged within the task itself
     async fn cmd_reboot(&self, params: &Value) -> (bool, Value, Option<String>) {
         info!("Executing reboot command");
 
@@ -435,8 +441,8 @@ impl CommandHandler {
         {
             info!("Scheduling reboot in {} seconds", delay_secs);
 
-            // Use tokio spawn to not block the response
-            tokio::spawn(async move {
+            // Fire-and-forget: JoinHandle intentionally not tracked (system rebooting)
+            let _ = tokio::spawn(async move {
                 tokio::time::sleep(tokio::time::Duration::from_secs(delay_secs)).await;
 
                 // Execute reboot
@@ -470,13 +476,19 @@ impl CommandHandler {
     }
 
     /// Restart the agent service
+    ///
+    /// # Task Handle
+    /// The spawned task is intentionally not tracked because:
+    /// 1. The agent will be restarted by systemd - no graceful shutdown needed
+    /// 2. We must return the response before the restart occurs
+    /// 3. Any panic is logged within the task itself
     async fn cmd_restart_agent(&self) -> (bool, Value, Option<String>) {
         info!("Executing restart_agent command");
 
         #[cfg(target_os = "linux")]
         {
-            // Schedule restart
-            tokio::spawn(async {
+            // Fire-and-forget: JoinHandle intentionally not tracked (agent restarting)
+            let _ = tokio::spawn(async {
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
                 let status = std::process::Command::new("systemctl")

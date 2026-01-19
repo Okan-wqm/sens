@@ -27,6 +27,10 @@ use tracing::{debug, error, info, warn};
 /// Higher capacity reduces message loss during burst traffic
 const MESSAGE_CHANNEL_CAPACITY: usize = 500;
 
+/// Internal MQTT event loop buffer size (v1.2.6)
+/// Should match MESSAGE_CHANNEL_CAPACITY for consistent backpressure behavior
+const INTERNAL_MQTT_BUFFER_SIZE: usize = 500;
+
 /// Maximum retry attempts when channel is full (v1.2.3)
 const CHANNEL_SEND_MAX_RETRIES: u32 = 3;
 
@@ -44,6 +48,8 @@ pub struct MqttClient {
     device_code: String,
     /// Channel to receive incoming messages
     message_rx: mpsc::Receiver<IncomingMessage>,
+    /// Event loop task handle for graceful shutdown (v1.2.6)
+    event_loop_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 /// Incoming message from MQTT
@@ -231,17 +237,17 @@ impl MqttClient {
             retain: true,
         });
 
-        // Create client
-        let (client, mut eventloop) = AsyncClient::new(options, 100);
+        // Create client (v1.2.6: use constant for buffer size)
+        let (client, mut eventloop) = AsyncClient::new(options, INTERNAL_MQTT_BUFFER_SIZE);
 
         // Create message channel (v1.2.3: increased capacity)
         let (message_tx, message_rx) = mpsc::channel(MESSAGE_CHANNEL_CAPACITY);
 
-        // Spawn event loop handler with exponential backoff config
+        // Spawn event loop handler with exponential backoff config (v1.2.6: track handle)
         let topics_clone = topics.clone();
         let min_backoff = config.runtime.mqtt_reconnect_min_secs;
         let max_backoff = config.runtime.mqtt_reconnect_max_secs;
-        tokio::spawn(async move {
+        let event_loop_handle = tokio::spawn(async move {
             Self::handle_events(
                 &mut eventloop,
                 message_tx,
@@ -258,6 +264,7 @@ impl MqttClient {
             device_id: config.device_id.clone(),
             device_code: config.device_code.clone(),
             message_rx,
+            event_loop_handle: Some(event_loop_handle),
         };
 
         // Subscribe to command and config topics
@@ -459,7 +466,7 @@ impl MqttClient {
     }
 
     /// Disconnect from broker
-    pub async fn disconnect(self) -> Result<()> {
+    pub async fn disconnect(mut self) -> Result<()> {
         // Publish offline status before disconnecting
         let _ = self.publish_status(DeviceStatus::Offline, 0).await;
 
@@ -467,6 +474,16 @@ impl MqttClient {
             .disconnect()
             .await
             .context("Failed to disconnect MQTT")?;
+
+        // v1.2.6: Abort event loop task for graceful shutdown
+        if let Some(handle) = self.event_loop_handle.take() {
+            handle.abort();
+            // Wait briefly for task to terminate
+            let _ = tokio::time::timeout(
+                std::time::Duration::from_millis(100),
+                handle,
+            ).await;
+        }
 
         info!("MQTT disconnected");
         Ok(())
