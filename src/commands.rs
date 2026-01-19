@@ -25,6 +25,12 @@ use crate::mqtt::{CommandMessage, CommandResponse, IncomingMessage};
 use crate::scripting::{ExecutionMode, FBDefinition, ScriptDefinition, ScriptStorage};
 use crate::security::sanitize_for_log;
 
+/// Default delay before system reboot (seconds) - v1.2.6
+const DEFAULT_REBOOT_DELAY_SECS: u64 = 5;
+
+/// Default delay before agent restart (seconds) - v1.2.6
+const DEFAULT_RESTART_DELAY_SECS: u64 = 2;
+
 /// Simple sliding window rate limiter
 struct RateLimiter {
     /// Timestamps of recent commands
@@ -430,11 +436,11 @@ impl CommandHandler {
     async fn cmd_reboot(&self, params: &Value) -> (bool, Value, Option<String>) {
         info!("Executing reboot command");
 
-        // Check for delay parameter
+        // Check for delay parameter (v1.2.6: use constant for default)
         let delay_secs = params
             .get("delay_seconds")
             .and_then(|v| v.as_u64())
-            .unwrap_or(5);
+            .unwrap_or(DEFAULT_REBOOT_DELAY_SECS);
 
         // Schedule reboot
         #[cfg(target_os = "linux")]
@@ -489,7 +495,7 @@ impl CommandHandler {
         {
             // Fire-and-forget: JoinHandle intentionally not tracked (agent restarting)
             let _ = tokio::spawn(async {
-                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                tokio::time::sleep(tokio::time::Duration::from_secs(DEFAULT_RESTART_DELAY_SECS)).await;
 
                 let status = std::process::Command::new("systemctl")
                     .args(["restart", "suderra-agent"])

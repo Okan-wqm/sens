@@ -20,6 +20,7 @@
 #![allow(dead_code)]
 
 use serde::Serialize;
+use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
@@ -275,7 +276,8 @@ struct HealthStateInner {
     /// Number of FB instances (v1.2.4)
     fb_instance_count: AtomicU64,
     /// Recent errors buffer (v1.2.4)
-    recent_errors: std::sync::RwLock<Vec<String>>,
+    /// v1.2.6: Changed to VecDeque for O(1) removal from front
+    recent_errors: std::sync::RwLock<VecDeque<String>>,
     /// Config diagnostics (v1.2.4)
     config_diagnostics: std::sync::RwLock<Option<ConfigDiagnostics>>,
     /// MQTT last connected timestamp (v1.2.5)
@@ -309,7 +311,7 @@ impl HealthState {
                 script_loaded_count: AtomicU64::new(0),
                 script_active_count: AtomicU64::new(0),
                 fb_instance_count: AtomicU64::new(0),
-                recent_errors: std::sync::RwLock::new(Vec::with_capacity(10)),
+                recent_errors: std::sync::RwLock::new(VecDeque::with_capacity(10)),
                 config_diagnostics: std::sync::RwLock::new(None),
                 mqtt_last_connected: AtomicI64::new(0),
                 modbus_circuit_states: std::sync::RwLock::new(Vec::new()),
@@ -442,13 +444,14 @@ impl HealthState {
     }
 
     /// Add an error to the recent errors buffer (v1.2.4)
+    /// v1.2.6: Uses VecDeque::pop_front() for O(1) removal instead of Vec::remove(0)
     pub fn add_error(&self, error: impl Into<String>) {
         if let Ok(mut errors) = self.inner.recent_errors.write() {
             if errors.len() >= 10 {
-                errors.remove(0);
+                errors.pop_front(); // O(1) instead of O(n)
             }
             let timestamp = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
-            errors.push(format!("[{}] {}", timestamp, error.into()));
+            errors.push_back(format!("[{}] {}", timestamp, error.into()));
         }
     }
 
@@ -539,12 +542,12 @@ impl HealthState {
             .map(|p| (p.memory(), 0u32)) // thread count not directly available
             .unwrap_or((0, 0));
 
-        // Recent errors
-        let recent_errors = self
+        // Recent errors (v1.2.6: convert VecDeque to Vec for serialization)
+        let recent_errors: Vec<String> = self
             .inner
             .recent_errors
             .read()
-            .map(|e| e.clone())
+            .map(|e| e.iter().cloned().collect())
             .unwrap_or_default();
 
         // Config diagnostics

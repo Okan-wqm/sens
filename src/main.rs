@@ -696,7 +696,9 @@ async fn run_agent(
     info!("Connecting to MQTT broker...");
     let mqtt_client = {
         let state_guard = state.read().await;
-        MqttClient::new(&state_guard.config).await?
+        MqttClient::new(&state_guard.config)
+            .await
+            .context("Failed to connect to MQTT broker")?
     };
 
     {
