@@ -125,6 +125,10 @@ impl FunctionBlock for RS {
     fn get_output(&self, name: &str) -> Option<Value> {
         match name {
             "Q1" | "q1" | "Q" | "q" | "output" => Some(Value::Bool(self.q1)),
+            // v1.2.3: Added Q_NOT output for IEC 61131-3 compliance
+            "Q1_NOT" | "q1_not" | "QN" | "qn" | "NOT_Q" | "not_q" => {
+                Some(Value::Bool(!self.q1))
+            }
             _ => None,
         }
     }
@@ -183,7 +187,7 @@ impl FunctionBlock for RS {
     }
 
     fn output_names(&self) -> Vec<&'static str> {
-        vec!["Q1"]
+        vec!["Q1", "Q1_NOT"]
     }
 }
 
@@ -297,6 +301,10 @@ impl FunctionBlock for SR {
     fn get_output(&self, name: &str) -> Option<Value> {
         match name {
             "Q1" | "q1" | "Q" | "q" | "output" => Some(Value::Bool(self.q1)),
+            // v1.2.3: Added Q_NOT output for IEC 61131-3 compliance
+            "Q1_NOT" | "q1_not" | "QN" | "qn" | "NOT_Q" | "not_q" => {
+                Some(Value::Bool(!self.q1))
+            }
             _ => None,
         }
     }
@@ -355,7 +363,7 @@ impl FunctionBlock for SR {
     }
 
     fn output_names(&self) -> Vec<&'static str> {
-        vec!["Q1"]
+        vec!["Q1", "Q1_NOT"]
     }
 }
 
@@ -471,7 +479,8 @@ mod tests {
         let rs: Box<dyn FunctionBlock> = Box::new(RS::new());
         assert_eq!(rs.fb_type(), "RS");
         assert_eq!(rs.input_names(), vec!["S", "R1"]);
-        assert_eq!(rs.output_names(), vec!["Q1"]);
+        // v1.2.3: Added Q1_NOT output
+        assert_eq!(rs.output_names(), vec!["Q1", "Q1_NOT"]);
     }
 
     #[test]
@@ -589,7 +598,8 @@ mod tests {
         let sr: Box<dyn FunctionBlock> = Box::new(SR::new());
         assert_eq!(sr.fb_type(), "SR");
         assert_eq!(sr.input_names(), vec!["S1", "R"]);
-        assert_eq!(sr.output_names(), vec!["Q1"]);
+        // v1.2.3: Added Q1_NOT output
+        assert_eq!(sr.output_names(), vec!["Q1", "Q1_NOT"]);
     }
 
     #[test]
@@ -625,6 +635,34 @@ mod tests {
         // SR: Set dominant -> Q=TRUE
         assert!(!rs.q1());
         assert!(sr.q1());
+    }
+
+    /// v1.2.3: Test Q_NOT output (IEC 61131-3 compliance)
+    #[test]
+    fn test_q_not_output() {
+        let mut rs = RS::new();
+
+        // Initially Q=false, Q_NOT=true
+        assert_eq!(rs.get_output("Q1"), Some(Value::Bool(false)));
+        assert_eq!(rs.get_output("Q1_NOT"), Some(Value::Bool(true)));
+
+        // Set
+        rs.set_input("S", Value::Bool(true));
+        rs.execute();
+
+        // Q=true, Q_NOT=false
+        assert_eq!(rs.get_output("Q1"), Some(Value::Bool(true)));
+        assert_eq!(rs.get_output("Q1_NOT"), Some(Value::Bool(false)));
+        assert_eq!(rs.get_output("QN"), Some(Value::Bool(false))); // Alias
+
+        // Reset
+        rs.set_input("S", Value::Bool(false));
+        rs.set_input("R1", Value::Bool(true));
+        rs.execute();
+
+        // Q=false, Q_NOT=true
+        assert_eq!(rs.get_output("Q1"), Some(Value::Bool(false)));
+        assert_eq!(rs.get_output("Q1_NOT"), Some(Value::Bool(true)));
     }
 
     #[test]

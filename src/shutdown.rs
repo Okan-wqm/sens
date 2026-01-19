@@ -13,7 +13,7 @@
 use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
-use tracing::{debug, error, info, warn};
+use tracing::{info, warn};
 
 /// Broadcast channel capacity for shutdown signals (v1.2.3)
 /// Increased from 1 to 16 to prevent message loss when multiple subscribers exist

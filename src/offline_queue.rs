@@ -20,7 +20,7 @@ use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Mutex, MutexGuard};
 use tracing::{debug, error, info, warn};
 
 /// Acquire mutex lock with poison recovery (v1.2.3)

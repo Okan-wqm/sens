@@ -255,7 +255,10 @@ impl ModbusActor {
                     value,
                     response,
                 } => {
-                    let result = if let Some(client_arc) = self.manager.get_client(&device_name) {
+                    // v1.2.3: Use async get_client_by_name for reliable lookup
+                    let result = if let Some(client_arc) =
+                        self.manager.get_client_by_name(&device_name).await
+                    {
                         let mut client = client_arc.lock().await;
                         client.write_register(address, value).await
                     } else {
@@ -269,7 +272,10 @@ impl ModbusActor {
                     value,
                     response,
                 } => {
-                    let result = if let Some(client_arc) = self.manager.get_client(&device_name) {
+                    // v1.2.3: Use async get_client_by_name for reliable lookup
+                    let result = if let Some(client_arc) =
+                        self.manager.get_client_by_name(&device_name).await
+                    {
                         let mut client = client_arc.lock().await;
                         client.write_coil(address, value).await
                     } else {

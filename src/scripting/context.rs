@@ -150,10 +150,20 @@ impl ScriptContext {
                 "var" | "variable" => self.variables.get(source_name).cloned(),
                 "time" => {
                     // v1.2.1: Apply timezone offset for local time calculations
+                    // v1.2.3: Added validation with warning for invalid offsets
                     let utc_now = Utc::now();
                     let local_time = if self.timezone_offset_secs != 0 {
-                        let offset = FixedOffset::east_opt(self.timezone_offset_secs)
-                            .unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+                        // Valid timezone offsets are -43200 to 50400 seconds (-12h to +14h)
+                        let offset = match FixedOffset::east_opt(self.timezone_offset_secs) {
+                            Some(o) => o,
+                            None => {
+                                tracing::warn!(
+                                    "Invalid timezone_offset_secs: {}. Valid range is -43200 to 50400. Falling back to UTC.",
+                                    self.timezone_offset_secs
+                                );
+                                FixedOffset::east_opt(0).unwrap()
+                            }
+                        };
                         offset.from_utc_datetime(&utc_now.naive_utc())
                     } else {
                         FixedOffset::east_opt(0)
