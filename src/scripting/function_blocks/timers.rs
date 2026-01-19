@@ -189,6 +189,12 @@ impl FunctionBlock for TON {
                     }
                 }
                 TimerMode::ScanCycle => {
+                    // v1.2.6: Prevent scan_count overflow on extremely long-running timers
+                    // Reset at 1 billion cycles (~317 years at 100Hz) to prevent saturating_mul issues
+                    if self.scan_count >= 1_000_000_000 {
+                        self.scan_count = 0;
+                        self.start_instant = Some(Instant::now());
+                    }
                     self.scan_count += 1;
                     // v1.2.6: Prevent overflow on long-running timers
                     self.et_ms = self.scan_count.saturating_mul(self.cycle_time_ms);

@@ -262,8 +262,14 @@ impl TriggerManager {
         let hour_match = Self::match_cron_field_static(parts[1], now.hour());
         let day_match = Self::match_cron_field_static(parts[2], now.day());
         let month_match = Self::match_cron_field_static(parts[3], now.month());
+        // v1.2.6: Handle cron weekday 7 as Sunday (0) for compatibility
+        let weekday_pattern = if parts[4].contains('7') {
+            parts[4].replace('7', "0")
+        } else {
+            parts[4].to_string()
+        };
         let weekday_match =
-            Self::match_cron_field_static(parts[4], now.weekday().num_days_from_sunday());
+            Self::match_cron_field_static(&weekday_pattern, now.weekday().num_days_from_sunday());
 
         minute_match && hour_match && day_match && month_match && weekday_match
     }

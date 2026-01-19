@@ -857,11 +857,19 @@ impl ScriptEngine {
                 if let Some(var_name) = target.strip_prefix("var:") {
                     self.context.set_variable(var_name, value);
                 } else if let Some(sensor_name) = target.strip_prefix("sensor:") {
-                    if let Some(num) = value.as_f64() {
-                        self.context.set_sensor(sensor_name, num);
+                    // v1.2.6: Handle both f64 and i64 numeric values
+                    let sensor_value = if let Some(num) = value.as_f64() {
+                        Some(num)
+                    } else if let Some(int_val) = value.as_i64() {
+                        Some(int_val as f64)
                     } else if let Some(b) = value.as_bool() {
-                        self.context
-                            .set_sensor(sensor_name, if b { 1.0 } else { 0.0 });
+                        Some(if b { 1.0 } else { 0.0 })
+                    } else {
+                        None
+                    };
+
+                    if let Some(num) = sensor_value {
+                        self.context.set_sensor(sensor_name, num);
                     } else {
                         // v1.2.4: Log when FB output can't be converted to sensor value
                         warn!(

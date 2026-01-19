@@ -297,22 +297,30 @@ impl OfflineQueue {
         let conn = acquire_lock(&self.conn)?;
 
         // Check current queue size
-        let current_size: usize = conn
+        let mut current_size: usize = conn
             .query_row("SELECT COUNT(*) FROM message_queue", [], |row| row.get(0))
             .unwrap_or(0);
 
         // If at message count capacity, remove oldest low-priority message
         if current_size >= self.max_size {
             self.evict_one(&conn)?;
+            current_size = current_size.saturating_sub(1);
         }
 
         // v1.2.0: Check disk size limit and evict if necessary
+        // v1.2.6: Loop until under limit to prevent disk exhaustion
         if self.max_disk_bytes > 0 {
-            let db_size = self.get_db_size(&conn);
-            if db_size >= self.max_disk_bytes {
-                // v1.2.6: Evict 10% of messages (min 5, max 50) to reclaim disk space
+            let mut db_size = self.get_db_size(&conn);
+            let mut eviction_rounds = 0;
+            const MAX_EVICTION_ROUNDS: usize = 10; // Prevent infinite loop
+
+            while db_size >= self.max_disk_bytes && current_size > 0 && eviction_rounds < MAX_EVICTION_ROUNDS {
+                // Evict 10% of messages (min 5, max 50) to reclaim disk space
                 let evict_count = (current_size / 10).max(5).min(50);
                 self.evict_for_disk_space(&conn, evict_count)?;
+                current_size = current_size.saturating_sub(evict_count);
+                db_size = self.get_db_size(&conn);
+                eviction_rounds += 1;
             }
         }
 
