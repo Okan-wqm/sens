@@ -23,6 +23,7 @@ mod interning;
 mod modbus;
 mod mqtt;
 mod offline_queue;
+mod plc_programming; // v1.3.0: PLC programming protocols (ST upload)
 mod provisioning;
 mod pwm; // v1.2.4: PWM support for motor/servo control
 mod resilience;

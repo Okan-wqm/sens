@@ -1,6 +1,6 @@
 # Suderra Edge Agent - Web API Reference
 
-**Version**: 1.2.6
+**Version**: 1.3.0
 **Platform**: Raspberry Pi / Revolution Pi / Generic Linux
 **Protocol**: MQTT 3.1.1 + HTTP Health API
 
@@ -12,20 +12,21 @@
 2. [Remote Commands](#2-remote-commands)
 3. [Telemetry](#3-telemetry)
 4. [Hardware Interfaces](#4-hardware-interfaces)
-5. [Scripting Engine](#5-scripting-engine)
-6. [Function Blocks (IEC 61131-3)](#6-function-blocks-iec-61131-3)
-7. [Alarm Management (IEC 62682)](#7-alarm-management-iec-62682)
-8. [Backup & Restore](#8-backup--restore)
-9. [Offline Queue](#9-offline-queue)
-10. [Resilience Patterns](#10-resilience-patterns)
-11. [HTTP Health API](#11-http-health-api)
-12. [Security](#12-security)
-13. [Configuration](#13-configuration)
-14. [Environment Variables](#14-environment-variables)
-15. [Feature Flags](#15-feature-flags)
-16. [Error Types](#16-error-types)
-17. [Provisioning](#17-provisioning)
-18. [Limits & Defaults](#18-limits--defaults)
+5. [PLC Programming (v1.3.0)](#5-plc-programming-v130)
+6. [Scripting Engine](#6-scripting-engine)
+7. [Function Blocks (IEC 61131-3)](#7-function-blocks-iec-61131-3)
+8. [Alarm Management (IEC 62682)](#8-alarm-management-iec-62682)
+9. [Backup & Restore](#9-backup--restore)
+10. [Offline Queue](#10-offline-queue)
+11. [Resilience Patterns](#11-resilience-patterns)
+12. [HTTP Health API](#12-http-health-api)
+13. [Security](#13-security)
+14. [Configuration](#14-configuration)
+15. [Environment Variables](#15-environment-variables)
+16. [Feature Flags](#16-feature-flags)
+17. [Error Types](#17-error-types)
+18. [Provisioning](#18-provisioning)
+19. [Limits & Defaults](#19-limits--defaults)
 
 ---
 
@@ -700,7 +701,237 @@ spi:
 
 ---
 
-## 5. Scripting Engine
+## 5. PLC Programming (v1.3.0)
+
+Upload IEC 61131-3 programs (Structured Text, Ladder, FBD) to external PLCs via industrial protocols.
+
+### 5.1 Supported Protocols
+
+| Protocol | PLCs | Port | Features |
+|----------|------|------|----------|
+| **Codesys Gateway** | WAGO, Festo, Schneider M241/M251, Codesys V3 | 1217 | Program upload, start/stop, status |
+| **S7comm** | Siemens S7-300/400/1200/1500 | 102 | Block upload, CPU control, status |
+| **OPC UA** | IEC 62541 compliant PLCs | 4840 | Program transfer via File nodes |
+| **EtherNet/IP CIP** | Allen-Bradley CompactLogix, ControlLogix | 44818 | Program upload, status |
+| **ADS/AMS** | Beckhoff TwinCAT 2/3, CX series | 48898 | Program transfer, boot project |
+
+### 5.2 PLC Programming Commands
+
+#### `plc_upload`
+Upload program to external PLC.
+
+```json
+// Request
+{
+  "command": "plc_upload",
+  "params": {
+    "protocol": "s7",
+    "address": "192.168.1.100",
+    "port": 102,
+    "rack": 0,
+    "slot": 1,
+    "program": {
+      "name": "MainProgram",
+      "language": "st",
+      "source": "VAR counter : INT := 0; END_VAR counter := counter + 1;",
+      "variables": [],
+      "function_blocks": []
+    }
+  }
+}
+
+// Response
+{
+  "success": true,
+  "program_name": "MainProgram",
+  "program_id": "OB1",
+  "warnings": [],
+  "timestamp": "2026-01-19T12:00:00Z"
+}
+```
+
+#### `plc_status`
+Get PLC connection status and run mode.
+
+```json
+// Request
+{
+  "command": "plc_status",
+  "params": {
+    "protocol": "s7",
+    "address": "192.168.1.100",
+    "rack": 0,
+    "slot": 1
+  }
+}
+
+// Response
+{
+  "connected": true,
+  "run_mode": "Run",
+  "model": "S7-1200",
+  "firmware": "4.5.0",
+  "current_program": "MainProgram",
+  "last_modified": "2026-01-19T10:00:00Z"
+}
+```
+
+#### `plc_start` / `plc_stop`
+Start or stop PLC execution.
+
+```json
+// Request
+{
+  "command": "plc_start",
+  "params": {
+    "protocol": "s7",
+    "address": "192.168.1.100",
+    "rack": 0,
+    "slot": 1
+  }
+}
+
+// Response
+{ "success": true, "action": "started" }
+```
+
+#### `plc_list`
+List programs on PLC.
+
+```json
+// Response
+{
+  "programs": ["OB1", "FB1", "DB1"],
+  "count": 3
+}
+```
+
+#### `plc_download`
+Download program from PLC.
+
+```json
+// Request
+{
+  "command": "plc_download",
+  "params": {
+    "protocol": "s7",
+    "address": "192.168.1.100",
+    "program_name": "OB1"
+  }
+}
+```
+
+#### `plc_delete`
+Delete program from PLC.
+
+```json
+// Request
+{
+  "command": "plc_delete",
+  "params": {
+    "protocol": "s7",
+    "address": "192.168.1.100",
+    "program_name": "OB1"
+  }
+}
+```
+
+### 5.3 Protocol-Specific Parameters
+
+#### Codesys Gateway
+```json
+{
+  "protocol": "codesys",
+  "address": "192.168.1.100",
+  "port": 1217,
+  "device_name": "Device1",
+  "application": "Application",
+  "username": "admin",
+  "password": "secret",
+  "encrypted": true
+}
+```
+
+#### Siemens S7comm
+```json
+{
+  "protocol": "s7",
+  "address": "192.168.1.100",
+  "port": 102,
+  "rack": 0,
+  "slot": 1
+}
+```
+
+#### OPC UA
+```json
+{
+  "protocol": "opcua",
+  "address": "192.168.1.100",
+  "port": 4840,
+  "username": "admin",
+  "password": "secret",
+  "client_cert_path": "/path/to/cert.pem",
+  "client_key_path": "/path/to/key.pem"
+}
+```
+
+#### Allen-Bradley EtherNet/IP
+```json
+{
+  "protocol": "ethernet_ip",
+  "address": "192.168.1.100",
+  "port": 44818,
+  "slot": 0,
+  "connection_path": "1/0/2/192.168.1.200"
+}
+```
+
+#### Beckhoff ADS
+```json
+{
+  "protocol": "ads",
+  "address": "192.168.1.100",
+  "port": 48898,
+  "ams_net_id": "192.168.1.100.1.1",
+  "target_ams_port": 851
+}
+```
+
+### 5.4 IEC 61131-3 Program Languages
+
+| Language | Code | Description |
+|----------|------|-------------|
+| Structured Text | `st` | Pascal-like programming |
+| Ladder Diagram | `ld` | Relay logic graphical |
+| Function Block Diagram | `fbd` | Graphical blocks |
+| Instruction List | `il` | Assembly-like |
+| Sequential Function Chart | `sfc` | State machine |
+
+### 5.5 Data Types (IEC 61131-3)
+
+| Type | Size | Range |
+|------|------|-------|
+| BOOL | 1 byte | TRUE/FALSE |
+| BYTE | 1 byte | 0..255 |
+| SINT | 1 byte | -128..127 |
+| INT | 2 bytes | -32768..32767 |
+| DINT | 4 bytes | -2³¹..2³¹-1 |
+| REAL | 4 bytes | IEEE 754 float |
+| LREAL | 8 bytes | IEEE 754 double |
+| TIME | 4 bytes | Duration |
+| STRING | 256 bytes | Text |
+
+### 5.6 Security Considerations
+
+- **Authentication**: Use protocol-specific credentials
+- **Network**: Ensure proper firewall rules for PLC ports
+- **Audit**: All program uploads are logged with timestamp and user
+- **IEC 62443**: Compliance for industrial network security
+
+---
+
+## 6. Scripting Engine
 
 ### 5.1 Execution Modes
 
@@ -1030,7 +1261,7 @@ Template syntax: `${source:name}`
 
 ---
 
-## 6. Function Blocks (IEC 61131-3)
+## 7. Function Blocks (IEC 61131-3)
 
 ### 6.1 Timer Function Blocks
 
@@ -1330,7 +1561,7 @@ Behavior:
 
 ---
 
-## 7. Alarm Management (IEC 62682)
+## 8. Alarm Management (IEC 62682)
 
 Alarm management following IEC 62682 standard for industrial automation.
 
@@ -1427,7 +1658,7 @@ Alarm history is maintained with maximum 1000 entries.
 
 ---
 
-## 8. Backup & Restore
+## 9. Backup & Restore
 
 Backup and restore functionality for disaster recovery (IEC 62443 SL2 FR7 compliance).
 
@@ -1532,7 +1763,7 @@ When `maxBackups` is exceeded, oldest backups are automatically deleted.
 
 ---
 
-## 9. Offline Queue
+## 10. Offline Queue
 
 ### 9.1 Priority Levels
 
@@ -1591,7 +1822,7 @@ When `maxBackups` is exceeded, oldest backups are automatically deleted.
 
 ---
 
-## 10. Resilience Patterns
+## 11. Resilience Patterns
 
 ### 10.1 Circuit Breaker
 
@@ -1633,7 +1864,7 @@ CLOSED ─(N failures)─→ OPEN
 
 ---
 
-## 11. HTTP Health API
+## 12. HTTP Health API
 
 **Build:** `cargo build --features health`
 **Port:** 8080 (configurable)
@@ -1753,7 +1984,7 @@ Comprehensive system diagnostics including all component details:
 
 ---
 
-## 12. Security
+## 13. Security
 
 ### 12.1 TLS/mTLS
 
@@ -1807,7 +2038,7 @@ modbus:
 
 ---
 
-## 13. Configuration
+## 14. Configuration
 
 ### 13.1 Config File Path
 
@@ -1996,7 +2227,7 @@ runtime:
 
 ---
 
-## 14. Environment Variables
+## 15. Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -2018,7 +2249,7 @@ runtime:
 
 ---
 
-## 15. Feature Flags
+## 16. Feature Flags
 
 Cargo features that enable optional functionality:
 
@@ -2054,7 +2285,7 @@ cargo build --release --features "gpio,health,strict-security"
 
 ---
 
-## 16. Error Types
+## 17. Error Types
 
 ### 16.1 ModbusError
 
@@ -2134,7 +2365,7 @@ Command errors return structured responses:
 
 ---
 
-## 17. Provisioning
+## 18. Provisioning
 
 ### 17.1 Activation Flow
 
@@ -2180,7 +2411,7 @@ Command errors return structured responses:
 
 ---
 
-## 18. Limits & Defaults
+## 19. Limits & Defaults
 
 ### Core Limits
 
