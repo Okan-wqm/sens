@@ -364,14 +364,26 @@ impl BackupManager {
     }
 
     /// Decompress gzip data
+    /// v1.2.6: Added size limit to prevent decompression bomb attacks
     fn decompress(data: &[u8]) -> Result<Vec<u8>, BackupError> {
         use flate2::read::GzDecoder;
+        use std::io::Read;
 
         let mut decoder = GzDecoder::new(data);
         let mut decompressed = Vec::new();
-        decoder
+
+        // v1.2.6: Limit decompressed size to MAX_BACKUP_SIZE to prevent DoS
+        // Use take() to limit bytes read, preventing memory exhaustion
+        let mut limited_reader = (&mut decoder).take(MAX_BACKUP_SIZE as u64 + 1);
+        limited_reader
             .read_to_end(&mut decompressed)
             .map_err(|e| BackupError::Compression(format!("Failed to decompress: {}", e)))?;
+
+        // Check if we hit the limit (data was truncated = bomb attack)
+        if decompressed.len() > MAX_BACKUP_SIZE {
+            return Err(BackupError::TooLarge(decompressed.len()));
+        }
+
         Ok(decompressed)
     }
 

@@ -908,6 +908,69 @@ let mut windows = match self.windows.write() {
 
 ---
 
+## PHASE 10: v1.2.6 Security Audit Round 5
+
+**Date**: 2026-01-19
+**Version**: 1.2.6 (continued)
+
+### 10.1 Decompression Bomb Prevention
+**File**: `src/backup.rs:367-388`
+**Severity**: HIGH
+**Issue**: `decompress()` read gzip data without size limit - decompression bomb attack vector
+
+**Attack Scenario:**
+An attacker creates a malicious backup with a gzip compression bomb (small file that expands to GB+). When restored, unbounded `read_to_end()` exhausts system memory causing DoS.
+
+**Fix**: Added size limit using `take()`:
+```rust
+// Before (VULNERABLE)
+decoder.read_to_end(&mut decompressed)?;
+
+// After (Safe)
+let mut limited_reader = (&mut decoder).take(MAX_BACKUP_SIZE as u64 + 1);
+limited_reader.read_to_end(&mut decompressed)?;
+
+// Check if we hit the limit (bomb attack detected)
+if decompressed.len() > MAX_BACKUP_SIZE {
+    return Err(BackupError::TooLarge(decompressed.len()));
+}
+```
+
+---
+
+## v1.2.6 Round 5 Files Modified
+
+| File | Changes |
+|------|---------|
+| `src/backup.rs` | Decompression bomb prevention with size limit |
+
+---
+
+## v1.2.6 Round 5 Security Impact
+
+| Issue | Severity | Status |
+|-------|----------|--------|
+| Decompression bomb DoS | HIGH | Fixed |
+
+---
+
+## v1.2.6 Complete Summary
+
+### All Rounds Combined
+
+| Round | CRITICAL | HIGH | MEDIUM | LOW |
+|-------|----------|------|--------|-----|
+| Round 1 | 0 | 1 | 3 | 3 |
+| Round 2 | 1 | 2 | 1 | 0 |
+| Round 3 | 1 | 1 | 2 | 0 |
+| Round 4 | 2 | 0 | 1 | 0 |
+| Round 5 | 0 | 1 | 0 | 0 |
+| **Total** | **4** | **5** | **7** | **3** |
+
+**Grand Total: 19 bugs fixed in v1.2.6**
+
+---
+
 ## Remaining Work
 
 ### Future Enhancements (Optional)
