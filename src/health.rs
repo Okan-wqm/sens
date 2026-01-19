@@ -14,6 +14,9 @@
 //! # IEC 62443 SL2 Compliance
 //! - FR6: Timely Response to Events (health monitoring)
 
+// v1.2.4: API reserved for health feature - silence dead_code warnings
+#![allow(dead_code)]
+
 use serde::Serialize;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};

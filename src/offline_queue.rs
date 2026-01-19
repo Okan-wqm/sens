@@ -16,6 +16,9 @@
 //! # v1.2.3 Improvements
 //! - Added mutex poison recovery for better resilience
 
+// v1.2.4: API reserved for offline message queuing - silence dead_code warnings
+#![allow(dead_code)]
+
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
@@ -46,10 +49,12 @@ fn acquire_lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>> {
 /// Message priority levels (higher value = higher priority)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[repr(u8)]
+#[derive(Default)]
 pub enum MessagePriority {
     /// Low priority - background data, can be delayed
     Low = 0,
     /// Normal priority - regular telemetry
+    #[default]
     Normal = 1,
     /// High priority - important events
     High = 2,
@@ -57,11 +62,6 @@ pub enum MessagePriority {
     Critical = 3,
 }
 
-impl Default for MessagePriority {
-    fn default() -> Self {
-        MessagePriority::Normal
-    }
-}
 
 impl From<u8> for MessagePriority {
     fn from(value: u8) -> Self {

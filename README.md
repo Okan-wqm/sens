@@ -17,6 +17,7 @@ Industrial IoT Edge Agent for aquaculture monitoring and control systems. Built 
   - `metrics` stack: 0.22 → 0.24
 - **sysinfo 0.33 API**: Updated refresh methods and temperature handling
 - **Pattern Matching**: Adapted to Rust 2024 implicit borrow semantics
+- **Code Quality**: Added `strict-security` feature, clippy auto-fixes, dead code annotations for reserved APIs
 
 ## What's New in v1.2.3
 

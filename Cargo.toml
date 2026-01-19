@@ -112,6 +112,8 @@ health = ["axum"]
 telemetry = ["opentelemetry", "opentelemetry-otlp", "opentelemetry_sdk", "tracing-opentelemetry"]
 # Prometheus metrics export
 metrics = ["dep:metrics", "metrics-exporter-prometheus"]
+# v1.2.4: Strict security mode - enables additional security checks in production
+strict-security = []
 
 [profile.release]
 opt-level = "z"     # Optimize for size

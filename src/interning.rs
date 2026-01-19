@@ -15,6 +15,9 @@
 //! - MQTT topic patterns used repeatedly
 //! - Modbus register names polled every cycle
 
+// v1.2.4: API reserved for future memory optimization - silence dead_code warnings
+#![allow(dead_code)]
+
 use lasso::{Spur, ThreadedRodeo};
 use std::sync::OnceLock;
 

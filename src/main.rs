@@ -666,7 +666,7 @@ async fn run_agent(
             Err(e) => {
                 error!("Activation failed: {}", e);
                 error!("Will retry on next restart");
-                return Err(e.into());
+                return Err(e);
             }
         }
     } else {

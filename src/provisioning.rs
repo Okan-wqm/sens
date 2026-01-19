@@ -25,7 +25,7 @@ use crate::AppState;
 fn mask_token(token: &str) -> String {
     if token.len() >= 12 {
         format!("{}...{}", &token[..4], &token[token.len() - 4..])
-    } else if token.len() > 0 {
+    } else if !token.is_empty() {
         "*".repeat(token.len().min(8))
     } else {
         "(empty)".to_string()

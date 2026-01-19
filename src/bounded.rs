@@ -14,31 +14,43 @@
 
 use heapless::Vec as HVec;
 
+// v1.2.4: Reserved constants for future IEC 62443 bounded collection implementations
+// These ensure consistent capacity limits across the codebase
+
 /// Maximum number of register readings per Modbus read operation
+#[allow(dead_code)]
 pub const MAX_REGISTER_READINGS: usize = 128;
 
 /// Maximum number of errors to track per operation
+#[allow(dead_code)]
 pub const MAX_ERRORS: usize = 16;
 
 /// Maximum number of GPIO pin states
+#[allow(dead_code)]
 pub const MAX_GPIO_PINS: usize = 32;
 
 /// Maximum batch size for sensor data
+#[allow(dead_code)]
 pub const MAX_SENSOR_BATCH: usize = 64;
 
 /// Bounded collection of strings (error messages, etc.)
+#[allow(dead_code)]
 pub type BoundedStrings<const N: usize> = HVec<String, N>;
 
 /// Bounded collection of f64 values (sensor readings)
+#[allow(dead_code)]
 pub type BoundedReadings<const N: usize> = HVec<f64, N>;
 
 /// Bounded collection of u16 values (raw register values)
+#[allow(dead_code)]
 pub type BoundedRegisters<const N: usize> = HVec<u16, N>;
 
 /// Result type for bounded push operations
+#[allow(dead_code)]
 pub type BoundedPushResult<T> = Result<(), T>;
 
 /// Extension trait for bounded collections
+#[allow(dead_code)]
 pub trait BoundedExt<T> {
     /// Push an item, logging if the collection is full
     fn push_bounded(&mut self, item: T) -> bool;
@@ -70,12 +82,14 @@ impl<T, const N: usize> BoundedExt<T> for HVec<T, N> {
 }
 
 /// A bounded buffer for sensor readings with timestamp
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct BoundedSensorBuffer<const N: usize> {
     readings: HVec<SensorReading, N>,
 }
 
 /// A single sensor reading with metadata
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct SensorReading {
     /// Sensor/register name
@@ -134,6 +148,7 @@ impl<const N: usize> Default for BoundedSensorBuffer<N> {
 }
 
 /// A bounded error collector
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct BoundedErrors<const N: usize> {
     errors: HVec<String, N>,

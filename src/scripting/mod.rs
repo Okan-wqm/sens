@@ -42,9 +42,11 @@ use serde::{Deserialize, Serialize};
 /// Determines how the script engine operates
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum ExecutionMode {
     /// Event-driven mode (default): Scripts run when triggers fire
     /// Suitable for simple threshold-based rules
+    #[default]
     EventDriven,
     /// Scan cycle mode: PLC-like deterministic execution
     /// All function blocks execute every scan cycle (10-1000ms)
@@ -52,20 +54,17 @@ pub enum ExecutionMode {
     ScanCycle,
 }
 
-impl Default for ExecutionMode {
-    fn default() -> Self {
-        ExecutionMode::EventDriven
-    }
-}
 
 /// Script priority levels (v2.0)
 /// Higher values = higher priority = executes first
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum ScriptPriority {
     /// Lowest priority (default) - runs last
     Low = 0,
     /// Normal priority
+    #[default]
     Normal = 50,
     /// High priority - runs before normal scripts
     High = 100,
@@ -75,11 +74,6 @@ pub enum ScriptPriority {
     Emergency = 255,
 }
 
-impl Default for ScriptPriority {
-    fn default() -> Self {
-        ScriptPriority::Normal
-    }
-}
 
 impl ScriptPriority {
     /// Get numeric value for comparison

@@ -120,8 +120,10 @@ pub trait FunctionBlockStore: Send + Sync {
 /// Variable scope enumeration (IEC 61131-3)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum VariableScope {
     /// Local variable - lost on script restart
+    #[default]
     Local,
     /// Global variable - shared across scripts, lost on agent restart
     Global,
@@ -131,11 +133,6 @@ pub enum VariableScope {
     Persistent,
 }
 
-impl Default for VariableScope {
-    fn default() -> Self {
-        VariableScope::Local
-    }
-}
 
 /// Stored variable with metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -353,11 +350,9 @@ impl SqlitePersistence {
                 })?;
 
             let mut variables = Vec::new();
-            for row in rows {
-                if let Ok((name, value_json)) = row {
-                    if let Ok(value) = serde_json::from_str(&value_json) {
-                        variables.push((name, value));
-                    }
+            for (name, value_json) in rows.flatten() {
+                if let Ok(value) = serde_json::from_str(&value_json) {
+                    variables.push((name, value));
                 }
             }
 
@@ -880,11 +875,9 @@ impl VariableStore for SqlitePersistence {
             })?;
 
         let mut variables = Vec::new();
-        for row in rows {
-            if let Ok((name, value_json)) = row {
-                if let Ok(value) = serde_json::from_str(&value_json) {
-                    variables.push((name, value));
-                }
+        for (name, value_json) in rows.flatten() {
+            if let Ok(value) = serde_json::from_str(&value_json) {
+                variables.push((name, value));
             }
         }
 

@@ -169,6 +169,7 @@ fn default_scan_cycle() -> u64 {
 
 /// Persisted program state (for reload after restart)
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct ProgramState {
     /// Currently deployed program
     pub program: Option<ProgramDefinition>,
@@ -178,15 +179,6 @@ pub struct ProgramState {
     pub previous_version: Option<Box<ProgramDefinition>>,
 }
 
-impl Default for ProgramState {
-    fn default() -> Self {
-        Self {
-            program: None,
-            deployed_at: None,
-            previous_version: None,
-        }
-    }
-}
 
 // ============================================================================
 // Command Handler
@@ -1359,7 +1351,7 @@ impl CommandHandler {
         if let Some(telemetry) = config_update.get("telemetry") {
             if let Some(interval) = telemetry.get("interval_seconds").and_then(|v| v.as_u64()) {
                 // Validate: minimum 5 seconds, maximum 3600 seconds (1 hour)
-                if interval >= 5 && interval <= 3600 {
+                if (5..=3600).contains(&interval) {
                     state.config.telemetry.interval_seconds = interval;
                     config_changed = true;
                     info!("Updated telemetry interval to {} seconds", interval);

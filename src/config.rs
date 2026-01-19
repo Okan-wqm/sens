@@ -758,8 +758,10 @@ pub struct ModbusDeviceConfig {
 /// Byte order for multi-register values
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum ByteOrder {
     /// Big Endian (AB CD) - Most common for Modbus
+    #[default]
     BigEndian,
     /// Little Endian (CD AB)
     LittleEndian,
@@ -769,11 +771,6 @@ pub enum ByteOrder {
     LittleEndianByteSwap,
 }
 
-impl Default for ByteOrder {
-    fn default() -> Self {
-        ByteOrder::BigEndian
-    }
-}
 
 /// Modbus register configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]

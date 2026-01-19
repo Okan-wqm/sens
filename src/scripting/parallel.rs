@@ -41,8 +41,10 @@ use super::{Action, ActionResult};
 /// Synchronization type for parallel convergence
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum SyncType {
     /// All branches must complete before continuing (default)
+    #[default]
     And,
     /// First branch to complete allows continuation (others cancelled)
     Or,
@@ -50,11 +52,6 @@ pub enum SyncType {
     AllSettled,
 }
 
-impl Default for SyncType {
-    fn default() -> Self {
-        SyncType::And
-    }
-}
 
 /// Parallel branch definition
 #[derive(Debug, Clone, Serialize, Deserialize)]

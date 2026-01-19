@@ -94,18 +94,15 @@ pub enum ActionType {
 /// Alert levels
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum AlertLevel {
     Info,
+    #[default]
     Warning,
     Error,
     Critical,
 }
 
-impl Default for AlertLevel {
-    fn default() -> Self {
-        AlertLevel::Warning
-    }
-}
 
 /// Inline condition for an action
 #[derive(Debug, Clone, Serialize, Deserialize)]
