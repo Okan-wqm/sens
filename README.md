@@ -1081,6 +1081,6 @@ systemctl stop suderra-agent
 
 ## License
 
-Proprietary - Suderra
+Proprietary - Suderra AS
 
-Copyright (c) 2024 Suderra. All rights reserved.
+Copyright (c) 2026 Suderra. All rights reserved.
