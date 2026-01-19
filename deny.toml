@@ -39,12 +39,13 @@ allow = [
     "BSD-3-Clause",
     "BSL-1.0",
     "ISC",
+    "OpenSSL",  # Used by aws-lc-sys cryptography (permissive)
     "Zlib",
     "CC0-1.0",
     "Unicode-3.0",      # ICU/Unicode crates (OSI-approved)
-    "Unicode-DFS-2016",
     "Unlicense",
     "MPL-2.0",  # Weak copyleft, file-level
+    "CDLA-Permissive-2.0",  # Community Data License (webpki-roots)
     "LicenseRef-Proprietary",  # Our own proprietary code
 ]
 
