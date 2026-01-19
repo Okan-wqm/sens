@@ -26,9 +26,17 @@ use tracing::warn;
 /// assert_eq!(mask_secret("my-secret-token-12345"), "my-s...2345");
 /// assert_eq!(mask_secret("short"), "****");
 /// ```
+///
+/// # v1.2.6: UTF-8 Safe
+/// Uses char indices to prevent panic on multi-byte characters.
 pub fn mask_secret(secret: &str) -> String {
-    if secret.len() > 8 {
-        format!("{}...{}", &secret[..4], &secret[secret.len() - 4..])
+    let char_count = secret.chars().count();
+    if char_count > 8 {
+        // Get first 4 chars safely
+        let first_4: String = secret.chars().take(4).collect();
+        // Get last 4 chars safely
+        let last_4: String = secret.chars().skip(char_count - 4).collect();
+        format!("{}...{}", first_4, last_4)
     } else {
         "****".to_string()
     }

@@ -22,11 +22,19 @@ use crate::error::{ActivationErrorCode, AgentError};
 ///
 /// # Security
 /// Prevents token leakage in log files while allowing debugging.
+///
+/// # v1.2.6: UTF-8 Safe
+/// Uses char indices to prevent panic on multi-byte characters.
 fn mask_token(token: &str) -> String {
-    if token.len() >= 12 {
-        format!("{}...{}", &token[..4], &token[token.len() - 4..])
+    let char_count = token.chars().count();
+    if char_count >= 12 {
+        // Get first 4 chars safely
+        let first_4: String = token.chars().take(4).collect();
+        // Get last 4 chars safely
+        let last_4: String = token.chars().skip(char_count - 4).collect();
+        format!("{}...{}", first_4, last_4)
     } else if !token.is_empty() {
-        "*".repeat(token.len().min(8))
+        "*".repeat(char_count.min(8))
     } else {
         "(empty)".to_string()
     }

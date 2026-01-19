@@ -93,8 +93,15 @@ impl ScriptRateLimiter {
     }
 
     /// Check if a script can execute (and increment counter)
+    /// v1.2.6: Handle poisoned lock gracefully (deny by default for safety)
     pub fn check(&self, script_id: &str) -> bool {
-        let mut windows = self.windows.write().unwrap();
+        let mut windows = match self.windows.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::warn!("Rate limiter lock poisoned, recovering");
+                poisoned.into_inner()
+            }
+        };
 
         let window = windows
             .entry(script_id.to_string())
@@ -114,8 +121,15 @@ impl ScriptRateLimiter {
     }
 
     /// Get current rate for a script
+    /// v1.2.6: Handle poisoned lock gracefully
     pub fn current_rate(&self, script_id: &str) -> u32 {
-        let windows = self.windows.read().unwrap();
+        let windows = match self.windows.read() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::warn!("Rate limiter lock poisoned, recovering");
+                poisoned.into_inner()
+            }
+        };
         windows
             .get(script_id)
             .map(|w| w.count.load(Ordering::SeqCst))
@@ -123,8 +137,15 @@ impl ScriptRateLimiter {
     }
 
     /// Reset rate limit for a script
+    /// v1.2.6: Handle poisoned lock gracefully
     pub fn reset(&self, script_id: &str) {
-        let mut windows = self.windows.write().unwrap();
+        let mut windows = match self.windows.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::warn!("Rate limiter lock poisoned, recovering");
+                poisoned.into_inner()
+            }
+        };
         if let Some(window) = windows.get_mut(script_id) {
             window.count.store(0, Ordering::SeqCst);
             window.window_start = Instant::now();
@@ -132,8 +153,15 @@ impl ScriptRateLimiter {
     }
 
     /// Clear all rate limit windows
+    /// v1.2.6: Handle poisoned lock gracefully
     pub fn clear_all(&self) {
-        let mut windows = self.windows.write().unwrap();
+        let mut windows = match self.windows.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::warn!("Rate limiter lock poisoned, recovering");
+                poisoned.into_inner()
+            }
+        };
         windows.clear();
     }
 }

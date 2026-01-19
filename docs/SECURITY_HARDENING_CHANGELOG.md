@@ -833,6 +833,81 @@ loop {
 
 ---
 
+## PHASE 9: v1.2.6 Security Audit Round 4
+
+**Date**: 2026-01-19
+**Version**: 1.2.6 (continued)
+
+### 9.1 UTF-8 Safe Secret Masking
+**File**: `src/security.rs:29-35`
+**Severity**: CRITICAL
+**Issue**: `mask_secret()` used byte slicing which panics on multi-byte UTF-8
+
+**Fix**: Use char iterators for safe slicing:
+```rust
+// Before (PANIC RISK)
+format!("{}...{}", &secret[..4], &secret[secret.len() - 4..])
+
+// After (Safe)
+let char_count = secret.chars().count();
+let first_4: String = secret.chars().take(4).collect();
+let last_4: String = secret.chars().skip(char_count - 4).collect();
+format!("{}...{}", first_4, last_4)
+```
+
+---
+
+### 9.2 UTF-8 Safe Token Masking
+**File**: `src/provisioning.rs:25-33`
+**Severity**: CRITICAL
+**Issue**: `mask_token()` used byte slicing which panics on multi-byte UTF-8
+
+**Fix**: Same pattern as mask_secret() - use char iterators
+
+---
+
+### 9.3 RwLock Poison Recovery
+**File**: `src/scripting/limits.rs:97-138`
+**Severity**: MEDIUM
+**Issue**: Four `.unwrap()` calls on RwLock could panic if lock was poisoned
+
+**Fix**: Handle poisoned locks gracefully with recovery:
+```rust
+// Before (PANIC RISK)
+let mut windows = self.windows.write().unwrap();
+
+// After (Safe - recovers from poison)
+let mut windows = match self.windows.write() {
+    Ok(guard) => guard,
+    Err(poisoned) => {
+        tracing::warn!("Rate limiter lock poisoned, recovering");
+        poisoned.into_inner()
+    }
+};
+```
+
+---
+
+## v1.2.6 Round 4 Files Modified
+
+| File | Changes |
+|------|---------|
+| `src/security.rs` | UTF-8 safe mask_secret() |
+| `src/provisioning.rs` | UTF-8 safe mask_token() |
+| `src/scripting/limits.rs` | RwLock poison recovery |
+
+---
+
+## v1.2.6 Round 4 Security Impact
+
+| Issue | Severity | Status |
+|-------|----------|--------|
+| mask_secret() UTF-8 panic | CRITICAL | Fixed |
+| mask_token() UTF-8 panic | CRITICAL | Fixed |
+| RwLock poison panic | MEDIUM | Fixed |
+
+---
+
 ## Remaining Work
 
 ### Future Enhancements (Optional)
