@@ -37,6 +37,9 @@ use tracing::{debug, info, warn};
 /// Default S7 port (ISO-on-TCP)
 pub const DEFAULT_S7_PORT: u16 = 102;
 
+/// Maximum S7 packet size (TPKT max is 65535 but we limit for safety)
+const MAX_S7_PACKET_SIZE: usize = 65536;
+
 /// COTP connection request
 const COTP_CR: u8 = 0xE0;
 
@@ -327,7 +330,14 @@ impl S7Client {
             return Err(anyhow!("Invalid TPKT response"));
         }
 
-        let length = ((tpkt_header[2] as usize) << 8 | tpkt_header[3] as usize) - 4;
+        let total_length = ((tpkt_header[2] as usize) << 8) | (tpkt_header[3] as usize);
+        if total_length < 4 {
+            return Err(anyhow!("Invalid TPKT length: {} (minimum is 4)", total_length));
+        }
+        if total_length > MAX_S7_PACKET_SIZE {
+            return Err(anyhow!("TPKT packet too large: {} bytes (max {})", total_length, MAX_S7_PACKET_SIZE));
+        }
+        let length = total_length - 4;
         let mut response = vec![0u8; length];
         conn.read_exact(&mut response).await?;
 

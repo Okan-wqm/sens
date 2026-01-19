@@ -300,6 +300,11 @@ impl CodesysClient {
         // Parse header to get payload length (bytes 12-15)
         let payload_len = u32::from_le_bytes([header[12], header[13], header[14], header[15]]) as usize;
 
+        // Validate payload length to prevent memory exhaustion
+        if payload_len > MAX_PACKET_SIZE {
+            return Err(anyhow!("Payload length {} exceeds maximum {}", payload_len, MAX_PACKET_SIZE));
+        }
+
         // Read payload
         let mut response_payload = vec![0u8; payload_len];
         if payload_len > 0 {

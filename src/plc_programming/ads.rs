@@ -45,6 +45,9 @@ const ADS_TCP_HEADER_SIZE: usize = 6;
 /// AMS header size
 const AMS_HEADER_SIZE: usize = 32;
 
+/// Maximum AMS packet size (prevent memory exhaustion)
+const MAX_AMS_PACKET_SIZE: usize = 1024 * 1024; // 1MB
+
 /// ADS Command IDs
 const ADS_READ_DEVICE_INFO: u16 = 0x0001;
 const ADS_READ: u16 = 0x0002;
@@ -356,6 +359,11 @@ impl AdsClient {
         let ams_length =
             u32::from_le_bytes([tcp_header[2], tcp_header[3], tcp_header[4], tcp_header[5]])
                 as usize;
+
+        // Validate length to prevent memory exhaustion
+        if ams_length > MAX_AMS_PACKET_SIZE {
+            return Err(anyhow!("AMS packet too large: {} bytes (max {})", ams_length, MAX_AMS_PACKET_SIZE));
+        }
 
         // Read AMS data
         let mut ams_data = vec![0u8; ams_length];
