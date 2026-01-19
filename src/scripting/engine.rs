@@ -124,6 +124,9 @@ pub struct ScriptEngine {
     scan_stats: ScanCycleStats,
     /// Path to program state file (v2.1 - for reload on startup)
     program_state_path: PathBuf,
+    /// Shared HTTP client for webhooks (v1.2.4 - resource optimization)
+    /// Reusing client maintains connection pool and reduces overhead
+    http_client: Option<reqwest::Client>,
 }
 
 /// Default scan cycle time in ms (100ms = 10 Hz)
@@ -166,6 +169,7 @@ impl ScriptEngine {
             fb_registry: FBRegistry::new(),
             scan_stats: ScanCycleStats::default(),
             program_state_path: default_program_state_path(),
+            http_client: None, // Lazy initialized on first webhook
         }
     }
 
@@ -189,6 +193,7 @@ impl ScriptEngine {
             current_script_priority: 50, // Default: Normal priority
             persistence: None,
             execution_mode: ExecutionMode::EventDriven,
+            http_client: None, // Lazy initialized on first webhook
             scan_cycle_ms: DEFAULT_SCAN_CYCLE_MS,
             fb_registry: FBRegistry::new(),
             scan_stats: ScanCycleStats::default(),
@@ -224,6 +229,7 @@ impl ScriptEngine {
             fb_registry: FBRegistry::with_persistence(persistence),
             scan_stats: ScanCycleStats::default(),
             program_state_path: default_program_state_path(),
+            http_client: None,
         }
     }
 
@@ -265,6 +271,7 @@ impl ScriptEngine {
             fb_registry,
             scan_stats: ScanCycleStats::default(),
             program_state_path: default_program_state_path(),
+            http_client: None,
         }
     }
 
@@ -1647,14 +1654,22 @@ impl ScriptEngine {
             "Sending webhook"
         );
 
-        // Use reqwest for HTTP
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            .build();
-
-        let client = match client {
-            Ok(c) => c,
-            Err(e) => return ActionResult::failure(ActionType::Webhook, format!("Failed to create HTTP client: {}", e)),
+        // v1.2.4: Use shared HTTP client (lazy initialization)
+        // Reusing client maintains connection pool and reduces memory/CPU overhead
+        let client = match &self.http_client {
+            Some(c) => c.clone(),
+            None => {
+                // Initialize client on first use
+                let new_client = match reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(10))
+                    .pool_max_idle_per_host(2) // Limit idle connections
+                    .build()
+                {
+                    Ok(c) => c,
+                    Err(e) => return ActionResult::failure(ActionType::Webhook, format!("Failed to create HTTP client: {}", e)),
+                };
+                new_client
+            }
         };
 
         let request = match method.as_str() {
