@@ -37,6 +37,9 @@ use tracing::{debug, info, warn};
 /// Default EtherNet/IP port
 pub const DEFAULT_ENIP_PORT: u16 = 44818;
 
+/// Maximum EtherNet/IP packet size (prevent memory exhaustion)
+const MAX_ENIP_PACKET_SIZE: usize = 65536;
+
 /// EtherNet/IP Commands
 const ENIP_REGISTER_SESSION: u16 = 0x0065;
 const ENIP_UNREGISTER_SESSION: u16 = 0x0066;
@@ -298,6 +301,11 @@ impl EtherNetIpClient {
 
         // Get data length
         let data_len = u16::from_le_bytes([header[2], header[3]]) as usize;
+
+        // Validate data length to prevent memory exhaustion (IEC 62443 SL2)
+        if data_len > MAX_ENIP_PACKET_SIZE {
+            return Err(anyhow!("EtherNet/IP packet too large: {} bytes (max {})", data_len, MAX_ENIP_PACKET_SIZE));
+        }
 
         // Read data
         let mut response = header.to_vec();
