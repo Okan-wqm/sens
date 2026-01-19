@@ -437,7 +437,7 @@ impl S7Client {
         // S7 control parameters: P_PROGRAM for start, _STOP for stop
         let param: &[u8] = if start { b"P_PROGRAM" } else { b"_STOP" };
 
-        vec![
+        let mut request = vec![
             S7_PROTOCOL_ID,
             S7_JOB,
             0x00, 0x00,
@@ -450,7 +450,10 @@ impl S7Client {
             0xFD,
             0x00,
             param.len() as u8,
-        ]
+        ];
+        // Append the actual parameter bytes (P_PROGRAM or _STOP)
+        request.extend_from_slice(param);
+        request
     }
 
     /// Convert ST program to S7 AWL/MC7 format

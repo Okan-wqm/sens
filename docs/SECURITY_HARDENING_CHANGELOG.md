@@ -1920,7 +1920,7 @@ if size > MAX_OPCUA_MESSAGE_SIZE {
 
 | File | Changes |
 |------|---------|
-| `src/plc_programming/s7comm.rs` | TPKT underflow fix, max packet size validation |
+| `src/plc_programming/s7comm.rs` | TPKT underflow fix, max packet size validation, missing param bytes fix |
 | `src/plc_programming/codesys.rs` | Payload length validation |
 | `src/plc_programming/ads.rs` | AMS packet size validation |
 | `src/plc_programming/opcua.rs` | Message size validation (min/max) |
@@ -1936,8 +1936,35 @@ if size > MAX_OPCUA_MESSAGE_SIZE {
 | Codesys payload validation | HIGH | Fixed |
 | ADS packet size validation | HIGH | Fixed |
 | OPC UA size validation | CRITICAL | Fixed |
+| S7comm missing param bytes | CRITICAL | Fixed |
 
-**Total: 5 memory exhaustion/panic vulnerabilities fixed in v1.3.1**
+**Total: 6 vulnerabilities fixed in v1.3.1**
+
+---
+
+### 18.6 S7comm Missing Parameter Bytes in PLC Control
+**File**: `src/plc_programming/s7comm.rs:440-454`
+**Severity**: CRITICAL (Functionality)
+**Issue**: The `build_plc_control` function calculated `param.len()` for the header but never appended the actual parameter bytes (`P_PROGRAM` or `_STOP`) to the message
+
+```rust
+// Before (BROKEN - param bytes never sent!)
+let param: &[u8] = if start { b"P_PROGRAM" } else { b"_STOP" };
+vec![
+    // ... header with param.len() ...
+    param.len() as u8,
+]  // <-- Missing: param bytes!
+
+// After (CORRECT)
+let mut request = vec![
+    // ... header with param.len() ...
+    param.len() as u8,
+];
+request.extend_from_slice(param);  // Append actual param bytes
+request
+```
+
+**Impact**: S7 start/stop commands now work correctly
 
 ---
 
