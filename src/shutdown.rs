@@ -133,15 +133,18 @@ where
     /// Run the task until completion or shutdown signal
     pub async fn run(self) {
         tokio::select! {
-            _ = self.task => {
-                // Task completed normally
-            }
+            // v1.2.4: biased; ensures shutdown signal is always checked first
+            biased;
+
             _ = async {
                 let mut rx = self.shutdown_rx;
                 let _ = rx.recv().await;
             } => {
                 // Shutdown signal received
                 info!("Shutdown signal received, stopping task");
+            }
+            _ = self.task => {
+                // Task completed normally
             }
         }
     }
@@ -153,10 +156,13 @@ where
     F: std::future::Future<Output = ()>,
 {
     tokio::select! {
-        _ = task => {}
+        // v1.2.4: biased; ensures shutdown signal is always checked first
+        biased;
+
         _ = shutdown_rx.recv() => {
             info!("Shutdown signal received");
         }
+        _ = task => {}
     }
 }
 

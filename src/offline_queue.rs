@@ -682,6 +682,161 @@ impl OfflineQueue {
     }
 }
 
+// ============================================================================
+// Async Wrapper (v1.2.4)
+// ============================================================================
+
+/// Async wrapper for OfflineQueue that uses spawn_blocking
+///
+/// All SQLite operations are wrapped in `tokio::task::spawn_blocking` to
+/// prevent blocking the async runtime. This is important for high-throughput
+/// scenarios where multiple async tasks access the queue concurrently.
+///
+/// # Example
+/// ```ignore
+/// let queue = AsyncOfflineQueue::new(OfflineQueue::new(path, 1000, 3600)?);
+/// queue.enqueue_async("topic", "payload", MessagePriority::Normal, 1, false).await?;
+/// ```
+pub struct AsyncOfflineQueue {
+    inner: std::sync::Arc<OfflineQueue>,
+}
+
+impl AsyncOfflineQueue {
+    /// Create a new async wrapper around an OfflineQueue
+    pub fn new(queue: OfflineQueue) -> Self {
+        Self {
+            inner: std::sync::Arc::new(queue),
+        }
+    }
+
+    /// Create from an existing Arc<OfflineQueue>
+    pub fn from_arc(queue: std::sync::Arc<OfflineQueue>) -> Self {
+        Self { inner: queue }
+    }
+
+    /// Get a clone of the inner Arc for sharing
+    pub fn inner(&self) -> std::sync::Arc<OfflineQueue> {
+        self.inner.clone()
+    }
+
+    /// Async enqueue - wraps blocking SQLite operation in spawn_blocking
+    pub async fn enqueue_async(
+        &self,
+        topic: &str,
+        payload: &str,
+        priority: MessagePriority,
+        qos: u8,
+        retain: bool,
+    ) -> Result<i64> {
+        let queue = self.inner.clone();
+        let topic = topic.to_string();
+        let payload = payload.to_string();
+
+        tokio::task::spawn_blocking(move || queue.enqueue(&topic, &payload, priority, qos, retain))
+            .await
+            .map_err(|e| anyhow::anyhow!("spawn_blocking join error: {}", e))?
+    }
+
+    /// Async peek - get next message without removing
+    pub async fn peek_async(&self) -> Result<Option<QueuedMessage>> {
+        let queue = self.inner.clone();
+
+        tokio::task::spawn_blocking(move || queue.peek())
+            .await
+            .map_err(|e| anyhow::anyhow!("spawn_blocking join error: {}", e))?
+    }
+
+    /// Async ack - acknowledge and remove message
+    pub async fn ack_async(&self, message_id: i64) -> Result<bool> {
+        let queue = self.inner.clone();
+
+        tokio::task::spawn_blocking(move || queue.ack(message_id))
+            .await
+            .map_err(|e| anyhow::anyhow!("spawn_blocking join error: {}", e))?
+    }
+
+    /// Async nack - mark message for retry
+    pub async fn nack_async(&self, message_id: i64) -> Result<()> {
+        let queue = self.inner.clone();
+
+        tokio::task::spawn_blocking(move || queue.nack(message_id))
+            .await
+            .map_err(|e| anyhow::anyhow!("spawn_blocking join error: {}", e))?
+    }
+
+    /// Async peek_batch - get multiple messages
+    pub async fn peek_batch_async(&self, max_count: usize) -> Result<Vec<QueuedMessage>> {
+        let queue = self.inner.clone();
+
+        tokio::task::spawn_blocking(move || queue.peek_batch(max_count))
+            .await
+            .map_err(|e| anyhow::anyhow!("spawn_blocking join error: {}", e))?
+    }
+
+    /// Async ack_batch - acknowledge multiple messages
+    pub async fn ack_batch_async(&self, message_ids: Vec<i64>) -> Result<usize> {
+        let queue = self.inner.clone();
+
+        tokio::task::spawn_blocking(move || queue.ack_batch(&message_ids))
+            .await
+            .map_err(|e| anyhow::anyhow!("spawn_blocking join error: {}", e))?
+    }
+
+    /// Async stats - get queue statistics
+    pub async fn stats_async(&self) -> Result<QueueStats> {
+        let queue = self.inner.clone();
+
+        tokio::task::spawn_blocking(move || queue.stats())
+            .await
+            .map_err(|e| anyhow::anyhow!("spawn_blocking join error: {}", e))?
+    }
+
+    /// Async clear - remove all messages
+    pub async fn clear_async(&self) -> Result<usize> {
+        let queue = self.inner.clone();
+
+        tokio::task::spawn_blocking(move || queue.clear())
+            .await
+            .map_err(|e| anyhow::anyhow!("spawn_blocking join error: {}", e))?
+    }
+
+    /// Async vacuum - reclaim disk space
+    pub async fn vacuum_async(&self) -> Result<(u64, u64)> {
+        let queue = self.inner.clone();
+
+        tokio::task::spawn_blocking(move || queue.vacuum())
+            .await
+            .map_err(|e| anyhow::anyhow!("spawn_blocking join error: {}", e))?
+    }
+
+    /// Async vacuum_if_needed - conditionally reclaim disk space
+    pub async fn vacuum_if_needed_async(&self) -> Result<Option<(u64, u64)>> {
+        let queue = self.inner.clone();
+
+        tokio::task::spawn_blocking(move || queue.vacuum_if_needed())
+            .await
+            .map_err(|e| anyhow::anyhow!("spawn_blocking join error: {}", e))?
+    }
+
+    /// Sync len (doesn't need spawn_blocking - very fast query)
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    /// Sync is_empty
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+}
+
+impl Clone for AsyncOfflineQueue {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

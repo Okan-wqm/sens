@@ -781,6 +781,9 @@ async fn run_agent(
 
     loop {
         tokio::select! {
+            // v1.2.4: biased; ensures shutdown signal is always checked first
+            biased;
+
             _ = shutdown.changed() => {
                 if *shutdown.borrow() {
                     info!("Shutdown signal received");

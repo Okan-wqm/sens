@@ -998,8 +998,21 @@ impl ModbusClient {
 /// # Thread Safety (v1.2.0)
 /// Uses `Arc<Mutex>` for each client to enable parallel reads across devices.
 /// Sequential operations still work as before for backwards compatibility.
+///
+/// # Why Mutex instead of RwLock (v1.2.4)
+/// Modbus protocol requires exclusive access to the TCP/RTU connection for each
+/// request-response cycle. Even "read" operations (reading holding registers)
+/// require:
+/// 1. Sending request bytes on the socket (write)
+/// 2. Updating internal buffers and timeout state (write)
+/// 3. Receiving response bytes from the socket (read)
+///
+/// Since reads and writes are interleaved for every operation, RwLock would
+/// provide no benefit - all operations need exclusive (&mut) access anyway.
+/// Multiple devices CAN be read in parallel since each has its own connection.
 pub struct ModbusManager {
     /// Clients wrapped in Arc<Mutex> for parallel access (v1.2.0)
+    /// Note: Mutex is correct here - see struct-level docs for explanation
     clients: Vec<Arc<Mutex<ModbusClient>>>,
 }
 
