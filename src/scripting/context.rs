@@ -213,8 +213,15 @@ impl ScriptContext {
         let re = get_interpolation_regex();
 
         for cap in re.captures_iter(template) {
-            let full_match = cap.get(0).unwrap().as_str();
-            let var_name = &cap[1];
+            // v1.2.6: Safe capture group access to prevent panic on malformed regex
+            let full_match = match cap.get(0) {
+                Some(m) => m.as_str(),
+                None => continue,
+            };
+            let var_name = match cap.get(1) {
+                Some(m) => m.as_str(),
+                None => continue,
+            };
 
             if let Some(value) = self.get_value(var_name) {
                 let replacement = match value {

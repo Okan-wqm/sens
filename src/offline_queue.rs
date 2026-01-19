@@ -611,7 +611,11 @@ impl OfflineQueue {
     pub fn len(&self) -> usize {
         let conn = match self.conn.lock() {
             Ok(c) => c,
-            Err(_) => return 0,
+            Err(e) => {
+                // v1.2.6: Log poisoned mutex instead of silent failure
+                tracing::error!("Queue database mutex poisoned: {}", e);
+                return 0;
+            }
         };
 
         conn.query_row("SELECT COUNT(*) FROM message_queue", [], |row| row.get(0))
@@ -669,7 +673,8 @@ impl OfflineQueue {
         }
 
         let db_size = self.get_db_size(&conn);
-        let threshold = (self.max_disk_bytes as f64 * 0.8) as u64;
+        // v1.2.6: Use integer arithmetic to avoid f64 precision loss on large values
+        let threshold = self.max_disk_bytes * 4 / 5; // 80% threshold
 
         // Check freelist pages (space available for reuse)
         let freelist_count: i64 = conn

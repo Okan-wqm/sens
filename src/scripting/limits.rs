@@ -111,9 +111,11 @@ impl ScriptRateLimiter {
             });
 
         // Reset window if minute has passed
-        if window.window_start.elapsed() >= Duration::from_secs(60) {
+        // v1.2.6: Capture time once to avoid TOCTOU race (time drift between check and assignment)
+        let now = Instant::now();
+        if now.duration_since(window.window_start) >= Duration::from_secs(60) {
             window.count.store(0, Ordering::SeqCst);
-            window.window_start = Instant::now();
+            window.window_start = now;
         }
 
         let current = window.count.fetch_add(1, Ordering::SeqCst);

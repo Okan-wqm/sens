@@ -652,7 +652,8 @@ impl ScriptEngine {
     async fn run_scan_cycle(&mut self) {
         let scan_interval = Duration::from_millis(self.scan_cycle_ms);
         let mut reload_counter = 0u64;
-        let reload_interval = (30000 / self.scan_cycle_ms).max(1); // Reload every ~30s
+        // v1.2.6: Use ceiling division for accurate reload timing
+        let reload_interval = ((30000 + self.scan_cycle_ms - 1) / self.scan_cycle_ms).max(1);
 
         info!(
             scan_cycle_ms = self.scan_cycle_ms,

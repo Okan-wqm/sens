@@ -1038,6 +1038,139 @@ MqttClient::new(&state_guard.config)
 
 ---
 
+## PHASE 12: v1.2.6 Deep Audit Round 7
+
+### 12.1 TOCTOU Race Condition Fix
+**File**: `src/scripting/limits.rs:114-117`
+**Severity**: HIGH (Concurrency)
+**Issue**: Time-of-check-time-of-use race - `elapsed()` and `Instant::now()` called separately
+**Fix**: Capture time once for both comparison and assignment
+
+```rust
+// Before (TOCTOU race)
+if window.window_start.elapsed() >= Duration::from_secs(60) {
+    window.count.store(0, Ordering::SeqCst);
+    window.window_start = Instant::now();  // Different instant than elapsed() check!
+}
+
+// After (Safe)
+let now = Instant::now();
+if now.duration_since(window.window_start) >= Duration::from_secs(60) {
+    window.count.store(0, Ordering::SeqCst);
+    window.window_start = now;  // Same instant used for both
+}
+```
+
+**Impact**: Prevents time drift between check and update
+
+---
+
+### 12.2 Floating Point Precision Fix
+**File**: `src/offline_queue.rs:672`
+**Severity**: MEDIUM (Precision)
+**Issue**: `u64 as f64 * 0.8 as u64` loses precision for large disk limits (100GB+)
+**Fix**: Use integer arithmetic
+
+```rust
+// Before (precision loss)
+let threshold = (self.max_disk_bytes as f64 * 0.8) as u64;
+
+// After (exact)
+let threshold = self.max_disk_bytes * 4 / 5;  // 80% threshold
+```
+
+**Impact**: Accurate disk threshold calculation for any size
+
+---
+
+### 12.3 Regex Capture Group Safety
+**File**: `src/scripting/context.rs:217`
+**Severity**: MEDIUM (Panic Prevention)
+**Issue**: Direct indexing `&cap[1]` panics if capture group doesn't exist
+**Fix**: Use safe `cap.get(1)` with match
+
+```rust
+// Before (panic risk)
+let full_match = cap.get(0).unwrap().as_str();
+let var_name = &cap[1];
+
+// After (safe)
+let full_match = match cap.get(0) {
+    Some(m) => m.as_str(),
+    None => continue,
+};
+let var_name = match cap.get(1) {
+    Some(m) => m.as_str(),
+    None => continue,
+};
+```
+
+**Impact**: Prevents panic on malformed regex matches
+
+---
+
+### 12.4 Silent Failure Logging
+**File**: `src/offline_queue.rs:612-614`
+**Severity**: MEDIUM (Observability)
+**Issue**: Poisoned mutex returned 0 silently without logging
+**Fix**: Added error logging
+
+```rust
+// Before (silent failure)
+Err(_) => return 0,
+
+// After (logged)
+Err(e) => {
+    tracing::error!("Queue database mutex poisoned: {}", e);
+    return 0;
+}
+```
+
+**Impact**: Database issues now visible in logs
+
+---
+
+### 12.5 Integer Division Precision
+**File**: `src/scripting/engine.rs:655`
+**Severity**: LOW (Timing)
+**Issue**: Truncating division caused slightly shorter reload intervals
+**Fix**: Use ceiling division
+
+```rust
+// Before (truncating - 30000/7 = 4285, actual = 29995ms)
+let reload_interval = (30000 / self.scan_cycle_ms).max(1);
+
+// After (ceiling - 30000/7 = 4286, actual = 30002ms)
+let reload_interval = ((30000 + self.scan_cycle_ms - 1) / self.scan_cycle_ms).max(1);
+```
+
+**Impact**: Reload timing always >= 30 seconds
+
+---
+
+## v1.2.6 Round 7 Files Modified
+
+| File | Changes |
+|------|---------|
+| `src/scripting/limits.rs` | TOCTOU race fix with captured Instant |
+| `src/offline_queue.rs` | Integer arithmetic, mutex poison logging |
+| `src/scripting/context.rs` | Safe regex capture group access |
+| `src/scripting/engine.rs` | Ceiling division for reload interval |
+
+---
+
+## v1.2.6 Round 7 Deep Audit Impact
+
+| Issue | Severity | Status |
+|-------|----------|--------|
+| TOCTOU race condition | HIGH | Fixed |
+| Floating point precision | MEDIUM | Fixed |
+| Regex capture panic | MEDIUM | Fixed |
+| Silent mutex poison | MEDIUM | Fixed |
+| Integer division timing | LOW | Fixed |
+
+---
+
 ## v1.2.6 Complete Summary
 
 ### All Rounds Combined
@@ -1050,9 +1183,10 @@ MqttClient::new(&state_guard.config)
 | Round 4 | 2 | 0 | 1 | 0 |
 | Round 5 | 0 | 1 | 0 | 0 |
 | Round 6 | 0 | 1 | 1 | 1 |
-| **Total** | **4** | **6** | **8** | **4** |
+| Round 7 | 0 | 1 | 3 | 1 |
+| **Total** | **4** | **7** | **11** | **5** |
 
-**Grand Total: 22 issues fixed in v1.2.6**
+**Grand Total: 27 issues fixed in v1.2.6**
 
 ---
 
