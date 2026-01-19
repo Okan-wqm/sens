@@ -19,6 +19,11 @@ ExecStart=/usr/local/bin/suderra-agent
 Restart=on-failure
 RestartSec=5s
 
+# v1.2.4: Run as dedicated user for security (IEC 62443 SL2 FR1)
+# Create user: sudo useradd -r -s /usr/sbin/nologin suderra
+User=suderra
+Group=suderra
+
 # Watchdog: systemd will restart if no heartbeat in 30s
 WatchdogSec=30s
 
