@@ -999,4 +999,4 @@ systemctl stop suderra-agent
 
 Proprietary - Suderra
 
-Copyright (c) 2024 Suderra. All rights reserved.
+Copyright (c) 2026 Suderra AS. All rights reserved.
