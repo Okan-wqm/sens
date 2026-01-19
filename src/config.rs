@@ -1017,6 +1017,21 @@ impl AgentConfig {
             anyhow::bail!("device_id cannot be empty");
         }
 
+        // v1.2.5: Validate device_id looks like a UUID format (basic check)
+        // Format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (36 chars with hyphens)
+        if self.device_id.len() != 36
+            || self.device_id.chars().filter(|c| *c == '-').count() != 4
+            || !self
+                .device_id
+                .chars()
+                .all(|c| c.is_ascii_hexdigit() || c == '-')
+        {
+            anyhow::bail!(
+                "device_id '{}' is not a valid UUID format (expected: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)",
+                self.device_id
+            );
+        }
+
         // Validate device_code is not empty
         if self.device_code.trim().is_empty() {
             anyhow::bail!("device_code cannot be empty");
@@ -1027,11 +1042,25 @@ impl AgentConfig {
             anyhow::bail!("api_url must start with http:// or https://");
         }
 
+        // v1.2.5: Basic URL structure validation (must have host part)
+        let url_without_scheme = self
+            .api_url
+            .strip_prefix("https://")
+            .or_else(|| self.api_url.strip_prefix("http://"))
+            .unwrap_or("");
+        if url_without_scheme.is_empty() || !url_without_scheme.contains('.') {
+            anyhow::bail!(
+                "api_url '{}' appears invalid (must have a host like https://api.example.com)",
+                self.api_url
+            );
+        }
+
         // Validate MQTT port if configured
         if let Some(ref _broker) = self.mqtt.broker {
             if self.mqtt.port == 0 {
                 anyhow::bail!("MQTT port cannot be 0");
             }
+            // Note: port is u16 so max is already 65535
         }
 
         // v1.2.2: Platform-aware GPIO validation

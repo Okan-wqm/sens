@@ -1665,7 +1665,7 @@ impl ScriptEngine {
     /// ```json
     /// {
     ///   "type": "webhook",
-    ///   "url": "https://hooks.slack.com/services/XXX",
+    ///   "url": "https://your-webhook-endpoint.example.com/webhook",
     ///   "message": "{\"text\": \"Alert: ${message}\"}",
     ///   "method": "POST"
     /// }

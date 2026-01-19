@@ -383,15 +383,21 @@ impl GpioActor {
             match cmd {
                 GpioCommand::Init { response } => {
                     let result = self.init_gpio();
-                    let _ = response.send(result);
+                    if response.send(result).is_err() {
+                        warn!("GPIO Init response receiver dropped");
+                    }
                 }
                 GpioCommand::ReadAll { response } => {
                     let result = self.read_all_pins();
-                    let _ = response.send(result);
+                    if response.send(result).is_err() {
+                        warn!("GPIO ReadAll response receiver dropped");
+                    }
                 }
                 GpioCommand::ReadPin { pin, response } => {
                     let result = self.read_single_pin(pin);
-                    let _ = response.send(result);
+                    if response.send(result).is_err() {
+                        warn!("GPIO ReadPin response receiver dropped");
+                    }
                 }
                 GpioCommand::WritePin {
                     pin,
@@ -399,17 +405,25 @@ impl GpioActor {
                     response,
                 } => {
                     let result = self.write_single_pin(pin, value);
-                    let _ = response.send(result);
+                    if response.send(result).is_err() {
+                        warn!("GPIO WritePin response receiver dropped");
+                    }
                 }
                 GpioCommand::GetPinCount { response } => {
-                    let _ = response.send(self.configs.len());
+                    if response.send(self.configs.len()).is_err() {
+                        warn!("GPIO GetPinCount response receiver dropped");
+                    }
                 }
                 GpioCommand::IsAvailable { response } => {
-                    let _ = response.send(self.is_gpio_available());
+                    if response.send(self.is_gpio_available()).is_err() {
+                        warn!("GPIO IsAvailable response receiver dropped");
+                    }
                 }
                 GpioCommand::Reconfigure { configs, response } => {
                     let result = self.reconfigure_pins(configs);
-                    let _ = response.send(result);
+                    if response.send(result).is_err() {
+                        warn!("GPIO Reconfigure response receiver dropped");
+                    }
                 }
             }
         }

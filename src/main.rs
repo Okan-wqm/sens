@@ -325,13 +325,22 @@ fn main() {
     }
 
     // Build optimized runtime for edge devices
-    let runtime = tokio::runtime::Builder::new_multi_thread()
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2) // Edge devices typically have 2 cores
         .max_blocking_threads(8) // Limit for SQLite blocking ops
         .thread_stack_size(128 * 1024) // 128 KB per thread (embedded friendly)
         .enable_all()
         .build()
-        .expect("Failed to build Tokio runtime");
+    {
+        Ok(rt) => rt,
+        Err(e) => {
+            #[allow(clippy::print_stderr)]
+            {
+                eprintln!("Failed to build Tokio runtime: {}", e);
+            }
+            std::process::exit(1);
+        }
+    };
 
     // Run async main within the custom runtime
     if let Err(e) = runtime.block_on(async_main()) {

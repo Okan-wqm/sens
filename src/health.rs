@@ -22,7 +22,7 @@
 use serde::Serialize;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tracing::{error, info};
 
@@ -278,6 +278,12 @@ struct HealthStateInner {
     recent_errors: std::sync::RwLock<Vec<String>>,
     /// Config diagnostics (v1.2.4)
     config_diagnostics: std::sync::RwLock<Option<ConfigDiagnostics>>,
+    /// MQTT last connected timestamp (v1.2.5)
+    mqtt_last_connected: AtomicI64,
+    /// Modbus circuit breaker states (v1.2.5)
+    modbus_circuit_states: std::sync::RwLock<Vec<(String, String)>>,
+    /// Function block type counts (v1.2.5)
+    fb_type_counts: std::sync::RwLock<std::collections::HashMap<String, usize>>,
 }
 
 impl HealthState {
@@ -305,6 +311,9 @@ impl HealthState {
                 fb_instance_count: AtomicU64::new(0),
                 recent_errors: std::sync::RwLock::new(Vec::with_capacity(10)),
                 config_diagnostics: std::sync::RwLock::new(None),
+                mqtt_last_connected: AtomicI64::new(0),
+                modbus_circuit_states: std::sync::RwLock::new(Vec::new()),
+                fb_type_counts: std::sync::RwLock::new(std::collections::HashMap::new()),
             }),
         }
     }
@@ -324,6 +333,11 @@ impl HealthState {
         self.inner
             .mqtt_connected
             .store(connected, Ordering::Release);
+        // Track last connected time (v1.2.5)
+        if connected {
+            let now = chrono::Utc::now().timestamp();
+            self.inner.mqtt_last_connected.store(now, Ordering::Release);
+        }
     }
 
     /// Set device activated status
@@ -385,6 +399,20 @@ impl HealthState {
         self.inner
             .fb_instance_count
             .store(count as u64, Ordering::Release);
+    }
+
+    /// Set Modbus circuit breaker states (v1.2.5)
+    pub fn set_modbus_circuit_states(&self, states: Vec<(String, String)>) {
+        if let Ok(mut guard) = self.inner.modbus_circuit_states.write() {
+            *guard = states;
+        }
+    }
+
+    /// Set function block type counts (v1.2.5)
+    pub fn set_fb_type_counts(&self, counts: std::collections::HashMap<String, usize>) {
+        if let Ok(mut guard) = self.inner.fb_type_counts.write() {
+            *guard = counts;
+        }
     }
 
     /// Set offline queue size
@@ -570,13 +598,26 @@ impl HealthState {
                     connected: self.inner.mqtt_connected.load(Ordering::Acquire),
                     messages_sent: self.inner.mqtt_sent.load(Ordering::Acquire),
                     messages_received: self.inner.mqtt_received.load(Ordering::Acquire),
-                    last_connected: None, // TODO: track last connection time
+                    last_connected: {
+                        let ts = self.inner.mqtt_last_connected.load(Ordering::Acquire);
+                        if ts > 0 {
+                            chrono::DateTime::from_timestamp(ts, 0)
+                                .map(|dt| dt.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+                        } else {
+                            None
+                        }
+                    },
                 },
                 modbus: ModbusDiagnostics {
                     client_count: self.inner.modbus_client_count.load(Ordering::Acquire) as usize,
                     total_reads: self.inner.modbus_reads.load(Ordering::Acquire),
                     read_errors: self.inner.modbus_errors.load(Ordering::Acquire),
-                    circuit_states: Vec::new(), // TODO: get from ModbusManager
+                    circuit_states: self
+                        .inner
+                        .modbus_circuit_states
+                        .read()
+                        .map(|g| g.clone())
+                        .unwrap_or_default(),
                 },
                 scripts: ScriptDiagnostics {
                     loaded_count: self.inner.script_loaded_count.load(Ordering::Acquire) as usize,
@@ -586,7 +627,12 @@ impl HealthState {
                 },
                 function_blocks: FunctionBlockDiagnostics {
                     instance_count: self.inner.fb_instance_count.load(Ordering::Acquire) as usize,
-                    type_counts: std::collections::HashMap::new(), // TODO: get from FBRegistry
+                    type_counts: self
+                        .inner
+                        .fb_type_counts
+                        .read()
+                        .map(|g| g.clone())
+                        .unwrap_or_default(),
                 },
                 offline_queue: OfflineQueueDiagnostics {
                     size: self.inner.offline_queue_size.load(Ordering::Acquire),

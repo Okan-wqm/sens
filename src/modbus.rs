@@ -232,19 +232,27 @@ impl ModbusActor {
             match cmd {
                 ModbusCommand::ConnectAll { response } => {
                     let errors = self.manager.connect_all().await;
-                    let _ = response.send(errors);
+                    if response.send(errors).is_err() {
+                        warn!("Modbus ConnectAll response receiver dropped");
+                    }
                 }
                 ModbusCommand::DisconnectAll { response } => {
                     self.manager.disconnect_all().await;
-                    let _ = response.send(());
+                    if response.send(()).is_err() {
+                        warn!("Modbus DisconnectAll response receiver dropped");
+                    }
                 }
                 ModbusCommand::ReadAll { response } => {
                     let results = self.manager.read_all().await;
-                    let _ = response.send(results);
+                    if response.send(results).is_err() {
+                        warn!("Modbus ReadAll response receiver dropped");
+                    }
                 }
                 ModbusCommand::ReadAllParallel { response } => {
                     let results = self.manager.read_all_parallel().await;
-                    let _ = response.send(results);
+                    if response.send(results).is_err() {
+                        warn!("Modbus ReadAllParallel response receiver dropped");
+                    }
                 }
                 ModbusCommand::WriteRegister {
                     device_name,
@@ -261,7 +269,9 @@ impl ModbusActor {
                     } else {
                         Err(anyhow::anyhow!("Device not found: {}", device_name))
                     };
-                    let _ = response.send(result);
+                    if response.send(result).is_err() {
+                        warn!("Modbus WriteRegister response receiver dropped");
+                    }
                 }
                 ModbusCommand::WriteCoil {
                     device_name,
@@ -278,10 +288,14 @@ impl ModbusActor {
                     } else {
                         Err(anyhow::anyhow!("Device not found: {}", device_name))
                     };
-                    let _ = response.send(result);
+                    if response.send(result).is_err() {
+                        warn!("Modbus WriteCoil response receiver dropped");
+                    }
                 }
                 ModbusCommand::DeviceCount { response } => {
-                    let _ = response.send(self.manager.device_count());
+                    if response.send(self.manager.device_count()).is_err() {
+                        warn!("Modbus DeviceCount response receiver dropped");
+                    }
                 }
             }
         }
