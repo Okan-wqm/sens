@@ -1968,6 +1968,30 @@ request
 
 ---
 
+### 18.7 OPC UA Hello Response Bounds Check
+**File**: `src/plc_programming/opcua.rs:533-536`
+**Severity**: HIGH (Panic)
+**Issue**: ACK check accesses `response[0..3]` without verifying response length
+
+```rust
+// Before (PANIC if response.len() < 3)
+if &response[0..3] != MSG_ACK {
+    return Err(anyhow!("OPC UA Hello rejected"));
+}
+
+// After (SAFE)
+if response.len() < 3 {
+    return Err(anyhow!("OPC UA Hello response too short ({} bytes)", response.len()));
+}
+if &response[0..3] != MSG_ACK {
+    return Err(anyhow!("OPC UA Hello rejected"));
+}
+```
+
+**Impact**: Prevents panic if OPC UA server sends truncated response
+
+---
+
 ## v1.3.0 Files Modified
 
 | File | Changes |

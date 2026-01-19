@@ -530,6 +530,9 @@ impl PlcProgrammer for OpcUaClient {
         let response = self.send_receive(&hello).await?;
 
         // Check for ACK
+        if response.len() < 3 {
+            return Err(anyhow!("OPC UA Hello response too short ({} bytes)", response.len()));
+        }
         if &response[0..3] != MSG_ACK {
             return Err(anyhow!("OPC UA Hello rejected"));
         }
