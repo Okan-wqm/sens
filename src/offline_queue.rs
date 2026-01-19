@@ -681,6 +681,117 @@ impl OfflineQueue {
         Ok(None)
     }
 
+    /// Create a backup using VACUUM INTO (v1.2.4)
+    ///
+    /// Creates a consistent, compact backup of the database to the specified path.
+    /// Unlike regular file copy, VACUUM INTO:
+    /// - Creates a consistent snapshot even during writes
+    /// - Compacts the database (removes fragmentation)
+    /// - Is atomic (backup is complete or doesn't exist)
+    ///
+    /// # Arguments
+    /// * `backup_path` - Path for the backup file (will be overwritten if exists)
+    ///
+    /// # Example
+    /// ```ignore
+    /// queue.backup_to("/var/backups/offline_queue_2024-01-15.db")?;
+    /// ```
+    pub fn backup_to(&self, backup_path: &str) -> Result<u64> {
+        let conn = self.conn.lock().map_err(|e| {
+            anyhow::anyhow!("Failed to lock database connection: {}", e)
+        })?;
+
+        // VACUUM INTO creates an atomic backup
+        conn.execute(&format!("VACUUM INTO '{}'", backup_path.replace('\'', "''")), [])
+            .with_context(|| format!("Failed to backup database to {}", backup_path))?;
+
+        // Get backup file size
+        let backup_size = std::fs::metadata(backup_path)
+            .map(|m| m.len())
+            .unwrap_or(0);
+
+        info!(
+            backup_path = %backup_path,
+            size_bytes = backup_size,
+            "Database backup created successfully"
+        );
+
+        Ok(backup_size)
+    }
+
+    /// Create a rolling backup with timestamp (v1.2.4)
+    ///
+    /// Creates a backup file with timestamp in the specified directory.
+    /// Automatically cleans up old backups if count exceeds max_backups.
+    ///
+    /// # Arguments
+    /// * `backup_dir` - Directory for backup files
+    /// * `max_backups` - Maximum number of backup files to keep (0 = unlimited)
+    ///
+    /// # Returns
+    /// * Path to the created backup file
+    pub fn backup_rolling(&self, backup_dir: &str, max_backups: usize) -> Result<String> {
+        use chrono::Local;
+        use std::fs;
+
+        // Create backup directory if needed
+        fs::create_dir_all(backup_dir)
+            .with_context(|| format!("Failed to create backup directory: {}", backup_dir))?;
+
+        // Generate timestamped filename
+        let timestamp = Local::now().format("%Y%m%d_%H%M%S");
+        let backup_path = format!("{}/offline_queue_{}.db", backup_dir, timestamp);
+
+        // Create backup
+        self.backup_to(&backup_path)?;
+
+        // Clean up old backups if needed
+        if max_backups > 0 {
+            self.cleanup_old_backups(backup_dir, max_backups)?;
+        }
+
+        Ok(backup_path)
+    }
+
+    /// Clean up old backup files, keeping only the most recent ones
+    fn cleanup_old_backups(&self, backup_dir: &str, max_backups: usize) -> Result<()> {
+        use std::fs;
+
+        let mut backups: Vec<_> = fs::read_dir(backup_dir)?
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry.file_name()
+                    .to_string_lossy()
+                    .starts_with("offline_queue_")
+                    && entry.file_name()
+                        .to_string_lossy()
+                        .ends_with(".db")
+            })
+            .collect();
+
+        // Sort by modified time (oldest first)
+        backups.sort_by_key(|entry| {
+            entry.metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+        });
+
+        // Remove oldest backups if we have too many
+        while backups.len() > max_backups {
+            if let Some(oldest) = backups.first() {
+                let path = oldest.path();
+                if let Err(e) = fs::remove_file(&path) {
+                    warn!(path = %path.display(), error = %e, "Failed to remove old backup");
+                } else {
+                    debug!(path = %path.display(), "Removed old backup");
+                }
+                backups.remove(0);
+            }
+        }
+
+        Ok(())
+    }
+
     /// Run SQLite integrity check (v1.2.4)
     ///
     /// Performs PRAGMA integrity_check to verify database consistency.
@@ -893,6 +1004,24 @@ impl AsyncOfflineQueue {
         let queue = self.inner.clone();
 
         tokio::task::spawn_blocking(move || queue.quick_check())
+            .await
+            .map_err(|e| anyhow::anyhow!("spawn_blocking join error: {}", e))?
+    }
+
+    /// Async backup to specific path
+    pub async fn backup_to_async(&self, backup_path: String) -> Result<u64> {
+        let queue = self.inner.clone();
+
+        tokio::task::spawn_blocking(move || queue.backup_to(&backup_path))
+            .await
+            .map_err(|e| anyhow::anyhow!("spawn_blocking join error: {}", e))?
+    }
+
+    /// Async rolling backup with automatic cleanup
+    pub async fn backup_rolling_async(&self, backup_dir: String, max_backups: usize) -> Result<String> {
+        let queue = self.inner.clone();
+
+        tokio::task::spawn_blocking(move || queue.backup_rolling(&backup_dir, max_backups))
             .await
             .map_err(|e| anyhow::anyhow!("spawn_blocking join error: {}", e))?
     }
@@ -1121,5 +1250,47 @@ mod tests {
             .unwrap();
         let result2 = queue.integrity_check().unwrap();
         assert!(result2.is_healthy);
+    }
+
+    #[test]
+    fn test_backup_to() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let backup_path = temp_dir.path().join("backup.db");
+
+        // Create queue with some data
+        let queue = OfflineQueue::new(&db_path, 100, 3600).unwrap();
+        queue
+            .enqueue("test", "payload", MessagePriority::Normal, 1, false)
+            .unwrap();
+
+        // Create backup
+        let size = queue.backup_to(backup_path.to_str().unwrap()).unwrap();
+        assert!(size > 0);
+        assert!(backup_path.exists());
+
+        // Verify backup is valid by opening it
+        let backup_queue = OfflineQueue::new(&backup_path, 100, 3600).unwrap();
+        assert_eq!(backup_queue.len(), 1);
+    }
+
+    #[test]
+    fn test_backup_rolling() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let backup_dir = temp_dir.path().join("backups");
+
+        // Create queue with some data
+        let queue = OfflineQueue::new(&db_path, 100, 3600).unwrap();
+        queue
+            .enqueue("test", "payload", MessagePriority::Normal, 1, false)
+            .unwrap();
+
+        // Create rolling backup
+        let backup_path = queue
+            .backup_rolling(backup_dir.to_str().unwrap(), 3)
+            .unwrap();
+        assert!(std::path::Path::new(&backup_path).exists());
+        assert!(backup_path.contains("offline_queue_"));
     }
 }
