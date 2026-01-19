@@ -1,4 +1,4 @@
-# Suderra Edge Agent Architecture v2.0
+# Suderra Edge Agent Architecture v1.2.4
 
 ## Overview
 
@@ -14,6 +14,11 @@ The Suderra Edge Agent is a Rust-based industrial IoT agent designed for aquacul
 - **v2.0: Graceful shutdown coordination**
 - **v2.0: Script execution limits (infinite loop protection)**
 - **v2.0: Script conflict detection (GPIO/Modbus write conflicts)**
+- **v1.2.4: PWM, I2C, SPI hardware support**
+- **v1.2.4: PID, MAVG, HYSTERESIS function blocks**
+- **v1.2.4: TLS certificate expiry monitoring**
+- **v1.2.4: Webhook action for external integrations**
+- **v1.2.4: SQLite VACUUM INTO backup**
 
 ## Architecture Diagram (v2.0)
 

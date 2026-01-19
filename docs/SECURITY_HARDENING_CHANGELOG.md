@@ -1,7 +1,7 @@
 # Edge-Agent Security Hardening Changelog
 
-**Date**: 2026-01-13
-**Version**: 2.1.1-security
+**Date**: 2026-01-19
+**Version**: 1.2.4
 **Author**: Claude Code
 
 ---
@@ -322,18 +322,141 @@ now_ms.saturating_sub(state.last_triggered) >= interval_ms
 
 ---
 
+## PHASE 5: v1.2.4 SRE & Security Enhancements
+
+**Date**: 2026-01-19
+**Version**: 1.2.4
+
+### 5.1 TLS Certificate Expiry Monitoring
+**File**: `src/security.rs:225-462`
+**Severity**: MEDIUM (Operational)
+**Feature**: Automated certificate health monitoring
+
+```rust
+pub struct CertificateExpiry {
+    pub path: String,
+    pub expiry_date: Option<DateTime<Utc>>,
+    pub days_remaining: Option<i64>,
+    pub status: CertExpiryStatus,
+    pub error: Option<String>,
+}
+
+pub enum CertExpiryStatus {
+    Ok,        // > 30 days
+    Warning,   // 14-30 days
+    Critical,  // 7-14 days
+    Urgent,    // < 7 days
+    Expired,   // Certificate expired
+    Unknown,   // Check failed
+}
+```
+
+**Usage**:
+```rust
+let expiry = check_certificate_expiry("/etc/suderra/certs/client.pem");
+log_certificate_expiry(&expiry);
+```
+
+---
+
+### 5.2 SQLite VACUUM INTO Backup
+**File**: `src/offline_queue.rs`
+**Severity**: MEDIUM (Operational)
+**Feature**: Atomic database backups with rolling retention
+
+```rust
+// Single backup
+pub fn backup_to(&self, backup_path: &str) -> Result<u64>
+
+// Rolling backups with automatic cleanup
+pub fn backup_rolling(&self, backup_dir: &str, max_backups: usize) -> Result<String>
+
+// Async versions
+pub async fn backup_to_async(&self, backup_path: &str) -> Result<u64>
+pub async fn backup_rolling_async(&self, backup_dir: &str, max_backups: usize) -> Result<String>
+```
+
+**Features**:
+- Uses `VACUUM INTO` for atomic, consistent backups
+- Rolling retention (e.g., keep last 5 backups)
+- Timestamps in filenames for easy identification
+- Returns backup file size for monitoring
+
+---
+
+### 5.3 Webhook Action Type
+**File**: `src/scripting/actions.rs`, `src/scripting/engine.rs`
+**Severity**: LOW (Feature)
+**Feature**: HTTP webhooks for external integrations
+
+```json
+{
+  "action_type": "webhook",
+  "url": "https://hooks.slack.com/services/XXX",
+  "method": "POST",
+  "message": "Alert: ${water_temp}°C exceeds threshold"
+}
+```
+
+**Supported Methods**: GET, POST (default)
+**Variable Interpolation**: `${sensor_name}`, `${var:name}`, etc.
+
+---
+
+### 5.4 Shared HTTP Client Optimization
+**File**: `src/scripting/engine.rs`
+**Severity**: LOW (Performance)
+**Issue**: Each webhook created new HTTP client (resource waste)
+**Fix**: Lazy-initialized shared client with connection pooling
+
+```rust
+pub struct ScriptEngine {
+    // ... other fields ...
+    http_client: Option<reqwest::Client>,  // Lazy initialized
+}
+
+// Configuration
+reqwest::Client::builder()
+    .timeout(Duration::from_secs(10))
+    .pool_max_idle_per_host(2)  // Limit idle connections
+    .build()
+```
+
+---
+
+### 5.5 Stress Testing Suite
+**File**: `tests/stress_test.rs`
+**Severity**: LOW (Quality)
+**Feature**: Load testing for capacity validation
+
+**Tests Added**:
+| Test | Purpose |
+|------|---------|
+| `stress_test_1000_devices` | Validate throughput under 5x load |
+| `stress_test_memory_stability` | Detect memory leaks |
+| `stress_test_channel_backpressure` | Verify bounded channels |
+| `stress_test_concurrent_scripts` | Parallel script execution |
+
+**Results**:
+- Throughput: ~787 msg/sec
+- Message Loss: 0% (queued messages)
+- Backpressure: 91.8% dropped under extreme load (by design)
+- Bounded channels: All buffer limits respected
+
+---
+
 ## Remaining Work
 
-### PHASE 3 (Advanced - Optional)
+### Future Enhancements (Optional)
 - Script engine current_script_id thread safety (requires API changes)
 - ScriptStorage singleton pattern (requires architectural changes)
 
-### PHASE 4 (Testing)
+### Testing
 - Integration tests for provisioning flow
 - Hardware abstraction layer for testing
 - Property-based testing (fuzzing)
 
-### PHASE 5 (Cleanup)
+### Cleanup
 - Remove unused `notify` dependency
 - Remove unused `uuid` dependency
 - Dead code removal
