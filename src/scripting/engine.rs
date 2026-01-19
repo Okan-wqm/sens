@@ -1772,6 +1772,7 @@ mod tests {
             params: super::super::FBParams {
                 pt_ms: Some(1000),
                 pv: None,
+                ..Default::default()
             },
             inputs: HashMap::new(),
             outputs: HashMap::new(),
@@ -1805,6 +1806,7 @@ mod tests {
             params: super::super::FBParams {
                 pt_ms: Some(5000),
                 pv: None,
+                ..Default::default()
             },
             inputs,
             outputs,

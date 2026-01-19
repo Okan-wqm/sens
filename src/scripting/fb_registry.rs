@@ -13,7 +13,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::{debug, info, warn};
 
-use super::function_blocks::{FunctionBlock, CTD, CTU, CTUD, F_TRIG, R_TRIG, RS, SR, TOF, TON, TP};
+use super::function_blocks::{
+    FunctionBlock, CTD, CTU, CTUD, F_TRIG, HYSTERESIS, MAVG, PID, R_TRIG, RS, SR, TOF, TON, TP,
+};
 use super::persistence::{FBState, FunctionBlockStore, SqlitePersistence};
 
 // ============================================================================
@@ -47,6 +49,36 @@ pub struct FBParams {
     /// Preset value (for counters)
     #[serde(default)]
     pub pv: Option<i32>,
+
+    // PID Controller parameters (v1.2.4)
+    /// Proportional gain
+    #[serde(default)]
+    pub kp: Option<f64>,
+    /// Integral gain
+    #[serde(default)]
+    pub ki: Option<f64>,
+    /// Derivative gain
+    #[serde(default)]
+    pub kd: Option<f64>,
+    /// Output minimum (for clamping)
+    #[serde(default)]
+    pub out_min: Option<f64>,
+    /// Output maximum (for clamping)
+    #[serde(default)]
+    pub out_max: Option<f64>,
+
+    // MAVG (Moving Average) parameters (v1.2.4)
+    /// Window size for moving average
+    #[serde(default)]
+    pub window_size: Option<u32>,
+
+    // HYSTERESIS parameters (v1.2.4)
+    /// High threshold (turn on)
+    #[serde(default)]
+    pub high_threshold: Option<f64>,
+    /// Low threshold (turn off)
+    #[serde(default)]
+    pub low_threshold: Option<f64>,
 }
 
 // ============================================================================
@@ -144,6 +176,24 @@ impl FBRegistry {
             // Flip-Flops (v1.2.3)
             "RS" => Box::new(RS::new()),
             "SR" => Box::new(SR::new()),
+            // Controllers (v1.2.4)
+            "PID" => {
+                let kp = def.params.kp.unwrap_or(1.0);
+                let ki = def.params.ki.unwrap_or(0.0);
+                let kd = def.params.kd.unwrap_or(0.0);
+                let out_min = def.params.out_min.unwrap_or(0.0);
+                let out_max = def.params.out_max.unwrap_or(100.0);
+                Box::new(PID::with_limits(kp, ki, kd, out_min, out_max))
+            }
+            "MAVG" | "MOVING_AVERAGE" => {
+                let n = def.params.window_size.unwrap_or(10) as usize;
+                Box::new(MAVG::new(n))
+            }
+            "HYSTERESIS" | "HYST" | "SCHMITT" => {
+                let high = def.params.high_threshold.unwrap_or(60.0);
+                let low = def.params.low_threshold.unwrap_or(40.0);
+                Box::new(HYSTERESIS::new(high, low))
+            }
             _ => {
                 return Err(FBRegistryError::UnknownType(def.fb_type.clone()));
             }
@@ -379,6 +429,7 @@ mod tests {
             params: FBParams {
                 pt_ms: Some(5000),
                 pv: None,
+                ..Default::default()
             },
             inputs: HashMap::new(),
             outputs: HashMap::new(),
@@ -400,6 +451,7 @@ mod tests {
             params: FBParams {
                 pt_ms: None,
                 pv: Some(100),
+                ..Default::default()
             },
             inputs: HashMap::new(),
             outputs: HashMap::new(),
@@ -415,7 +467,11 @@ mod tests {
         let mut registry = FBRegistry::new();
 
         // v1.2.3: Added RS and SR flip-flops
-        let types = ["TON", "TOF", "TP", "CTU", "CTD", "CTUD", "R_TRIG", "F_TRIG", "RS", "SR"];
+        // v1.2.4: Added PID, MAVG, HYSTERESIS controllers
+        let types = [
+            "TON", "TOF", "TP", "CTU", "CTD", "CTUD", "R_TRIG", "F_TRIG", "RS", "SR", "PID", "MAVG",
+            "HYSTERESIS",
+        ];
 
         for (i, fb_type) in types.iter().enumerate() {
             let def = FBDefinition {
@@ -429,7 +485,7 @@ mod tests {
             registry.create_fb(def).unwrap();
         }
 
-        assert_eq!(registry.count(), 10);
+        assert_eq!(registry.count(), 13);
     }
 
     #[test]
@@ -484,6 +540,128 @@ mod tests {
     }
 
     #[test]
+    fn test_pid_controller() {
+        let mut registry = FBRegistry::new();
+
+        registry
+            .create_fb(FBDefinition {
+                id: "temp_pid".to_string(),
+                fb_type: "PID".to_string(),
+                params: FBParams {
+                    kp: Some(2.0),
+                    ki: Some(0.1),
+                    kd: Some(0.5),
+                    out_min: Some(0.0),
+                    out_max: Some(100.0),
+                    ..Default::default()
+                },
+                inputs: HashMap::new(),
+                outputs: HashMap::new(),
+            })
+            .unwrap();
+
+        // Set setpoint and process value
+        registry.set_input("temp_pid", "SP", Value::from(50.0));
+        registry.set_input("temp_pid", "PV", Value::from(40.0));
+        registry.execute_all();
+
+        // Check that output is produced (error = 10, P = 2*10 = 20)
+        let out = registry.get_output("temp_pid", "OUT");
+        assert!(out.is_some());
+        if let Some(Value::Number(n)) = out {
+            let val = n.as_f64().unwrap();
+            assert!(val > 0.0, "PID should produce positive output for positive error");
+        }
+    }
+
+    #[test]
+    fn test_mavg_filter() {
+        let mut registry = FBRegistry::new();
+
+        registry
+            .create_fb(FBDefinition {
+                id: "sensor_avg".to_string(),
+                fb_type: "MAVG".to_string(),
+                params: FBParams {
+                    window_size: Some(3),
+                    ..Default::default()
+                },
+                inputs: HashMap::new(),
+                outputs: HashMap::new(),
+            })
+            .unwrap();
+
+        // Add samples: 10, 20, 30 -> average should be 20
+        registry.set_input("sensor_avg", "IN", Value::from(10.0));
+        registry.execute_all();
+
+        registry.set_input("sensor_avg", "IN", Value::from(20.0));
+        registry.execute_all();
+
+        registry.set_input("sensor_avg", "IN", Value::from(30.0));
+        registry.execute_all();
+
+        let out = registry.get_output("sensor_avg", "OUT");
+        assert!(out.is_some());
+        if let Some(Value::Number(n)) = out {
+            let val = n.as_f64().unwrap();
+            assert!((val - 20.0).abs() < 0.001, "MAVG(3) of [10,20,30] should be 20.0");
+        }
+    }
+
+    #[test]
+    fn test_hysteresis() {
+        let mut registry = FBRegistry::new();
+
+        registry
+            .create_fb(FBDefinition {
+                id: "temp_hyst".to_string(),
+                fb_type: "HYSTERESIS".to_string(),
+                params: FBParams {
+                    high_threshold: Some(30.0),
+                    low_threshold: Some(20.0),
+                    ..Default::default()
+                },
+                inputs: HashMap::new(),
+                outputs: HashMap::new(),
+            })
+            .unwrap();
+
+        // Input below low threshold - output should be false
+        registry.set_input("temp_hyst", "IN", Value::from(15.0));
+        registry.execute_all();
+        assert_eq!(
+            registry.get_output("temp_hyst", "OUT"),
+            Some(Value::Bool(false))
+        );
+
+        // Input above high threshold - output should be true
+        registry.set_input("temp_hyst", "IN", Value::from(35.0));
+        registry.execute_all();
+        assert_eq!(
+            registry.get_output("temp_hyst", "OUT"),
+            Some(Value::Bool(true))
+        );
+
+        // Input in middle (between thresholds) - should maintain previous state (true)
+        registry.set_input("temp_hyst", "IN", Value::from(25.0));
+        registry.execute_all();
+        assert_eq!(
+            registry.get_output("temp_hyst", "OUT"),
+            Some(Value::Bool(true)),
+            "Hysteresis should maintain state in dead band"
+        );
+
+        // Drop below low threshold - should turn off
+        registry.set_input("temp_hyst", "IN", Value::from(18.0));
+        registry.execute_all();
+        assert_eq!(
+            registry.get_output("temp_hyst", "OUT"),
+            Some(Value::Bool(false))
+        );
+    }
+
+    #[test]
     fn test_unknown_type() {
         let mut registry = FBRegistry::new();
 
@@ -527,6 +705,7 @@ mod tests {
             params: FBParams {
                 pv: Some(5),
                 pt_ms: None,
+                ..Default::default()
             },
             inputs: HashMap::new(),
             outputs: HashMap::new(),
@@ -641,6 +820,7 @@ mod tests {
                 params: FBParams {
                     pv: Some(10),
                     pt_ms: None,
+                    ..Default::default()
                 },
                 inputs: HashMap::new(),
                 outputs: HashMap::new(),

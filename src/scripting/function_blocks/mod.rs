@@ -5,17 +5,20 @@
 //! - Counters: CTU (Up), CTD (Down), CTUD (Up/Down)
 //! - Edge Detection: R_TRIG (Rising), F_TRIG (Falling)
 //! - Flip-Flops: RS (Reset-dominant), SR (Set-dominant) [v1.2.3]
+//! - Controllers: PID, MAVG (Moving Average), HYSTERESIS [v1.2.4]
 //!
 //! All function blocks:
 //! - Maintain internal state between scan cycles
 //! - Support persistence via FBState serialization
 //! - Implement the FunctionBlock trait for unified handling
 
+pub mod controllers;
 pub mod counters;
 pub mod edge_triggers;
 pub mod flipflops;
 pub mod timers;
 
+pub use controllers::{HYSTERESIS, MAVG, PID};
 pub use counters::{CTD, CTU, CTUD};
 pub use edge_triggers::{F_TRIG, R_TRIG};
 pub use flipflops::{RS, SR};

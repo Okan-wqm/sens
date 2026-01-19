@@ -7,12 +7,14 @@
 //! - `GET /health` - Basic health check (always returns 200 if server is running)
 //! - `GET /ready` - Readiness check (returns 200 only when fully initialized)
 //! - `GET /metrics` - Basic metrics (queue size, uptime, connections)
+//! - `GET /diagnostics` - Comprehensive diagnostics for remote troubleshooting (v1.2.4)
 //!
 //! # Configuration
 //! Enable with the `health` feature flag in Cargo.toml.
 //!
 //! # IEC 62443 SL2 Compliance
 //! - FR6: Timely Response to Events (health monitoring)
+//! - FR7: Resource Availability (diagnostics for troubleshooting)
 
 // v1.2.4: API reserved for health feature - silence dead_code warnings
 #![allow(dead_code)]
@@ -72,6 +74,163 @@ pub struct MetricsResponse {
     pub offline_queue_size: u64,
 }
 
+/// Comprehensive diagnostics response for troubleshooting (v1.2.4)
+#[derive(Debug, Clone, Serialize)]
+pub struct DiagnosticsResponse {
+    /// Timestamp of diagnostics collection
+    pub timestamp: String,
+    /// Agent version
+    pub version: &'static str,
+    /// Uptime in seconds
+    pub uptime_secs: u64,
+    /// System information
+    pub system: SystemDiagnostics,
+    /// Process information
+    pub process: ProcessDiagnostics,
+    /// Component status
+    pub components: ComponentDiagnostics,
+    /// Configuration summary (sanitized)
+    pub config: ConfigDiagnostics,
+    /// Recent errors (last 10)
+    pub recent_errors: Vec<String>,
+}
+
+/// System-level diagnostics
+#[derive(Debug, Clone, Serialize)]
+pub struct SystemDiagnostics {
+    /// Operating system
+    pub os: String,
+    /// Hostname
+    pub hostname: String,
+    /// CPU count
+    pub cpu_count: usize,
+    /// CPU usage percentage
+    pub cpu_usage_percent: f32,
+    /// Total memory (bytes)
+    pub memory_total_bytes: u64,
+    /// Used memory (bytes)
+    pub memory_used_bytes: u64,
+    /// Memory usage percentage
+    pub memory_usage_percent: f32,
+    /// Disk information
+    pub disk: DiskDiagnostics,
+}
+
+/// Disk diagnostics
+#[derive(Debug, Clone, Serialize)]
+pub struct DiskDiagnostics {
+    /// Total disk space (bytes)
+    pub total_bytes: u64,
+    /// Available disk space (bytes)
+    pub available_bytes: u64,
+    /// Usage percentage
+    pub usage_percent: f32,
+}
+
+/// Process-level diagnostics
+#[derive(Debug, Clone, Serialize)]
+pub struct ProcessDiagnostics {
+    /// Process ID
+    pub pid: u32,
+    /// Process memory usage (bytes)
+    pub memory_bytes: u64,
+    /// Number of threads
+    pub thread_count: u32,
+    /// Process start time (ISO 8601)
+    pub start_time: String,
+}
+
+/// Component status diagnostics
+#[derive(Debug, Clone, Serialize)]
+pub struct ComponentDiagnostics {
+    /// MQTT connection status
+    pub mqtt: MqttDiagnostics,
+    /// Modbus clients status
+    pub modbus: ModbusDiagnostics,
+    /// Script engine status
+    pub scripts: ScriptDiagnostics,
+    /// Function blocks status
+    pub function_blocks: FunctionBlockDiagnostics,
+    /// Offline queue status
+    pub offline_queue: OfflineQueueDiagnostics,
+}
+
+/// MQTT connection diagnostics
+#[derive(Debug, Clone, Serialize)]
+pub struct MqttDiagnostics {
+    /// Whether connected
+    pub connected: bool,
+    /// Messages sent
+    pub messages_sent: u64,
+    /// Messages received
+    pub messages_received: u64,
+    /// Last connection time
+    pub last_connected: Option<String>,
+}
+
+/// Modbus diagnostics
+#[derive(Debug, Clone, Serialize)]
+pub struct ModbusDiagnostics {
+    /// Number of configured clients
+    pub client_count: usize,
+    /// Total reads performed
+    pub total_reads: u64,
+    /// Read errors
+    pub read_errors: u64,
+    /// Circuit breaker states
+    pub circuit_states: Vec<(String, String)>,
+}
+
+/// Script engine diagnostics
+#[derive(Debug, Clone, Serialize)]
+pub struct ScriptDiagnostics {
+    /// Number of loaded scripts
+    pub loaded_count: usize,
+    /// Number of active scripts
+    pub active_count: usize,
+    /// Total executions
+    pub total_executions: u64,
+    /// Execution errors
+    pub execution_errors: u64,
+}
+
+/// Function block diagnostics
+#[derive(Debug, Clone, Serialize)]
+pub struct FunctionBlockDiagnostics {
+    /// Total FB instances
+    pub instance_count: usize,
+    /// FB types and counts
+    pub type_counts: std::collections::HashMap<String, usize>,
+}
+
+/// Offline queue diagnostics
+#[derive(Debug, Clone, Serialize)]
+pub struct OfflineQueueDiagnostics {
+    /// Current queue size
+    pub size: u64,
+    /// Queue capacity
+    pub capacity: u64,
+    /// Total messages queued
+    pub total_queued: u64,
+    /// Total messages sent from queue
+    pub total_sent: u64,
+}
+
+/// Configuration diagnostics (sanitized - no secrets)
+#[derive(Debug, Clone, Serialize)]
+pub struct ConfigDiagnostics {
+    /// Device ID (masked)
+    pub device_id: String,
+    /// MQTT broker host
+    pub mqtt_host: String,
+    /// Number of Modbus devices
+    pub modbus_device_count: usize,
+    /// Number of GPIO mappings
+    pub gpio_mapping_count: usize,
+    /// Telemetry interval (seconds)
+    pub telemetry_interval_secs: u64,
+}
+
 /// Health check state shared with the main application
 #[derive(Clone)]
 pub struct HealthState {
@@ -93,10 +252,32 @@ struct HealthStateInner {
     mqtt_received: AtomicU64,
     /// Modbus reads counter
     modbus_reads: AtomicU64,
+    /// Modbus read errors counter (v1.2.4)
+    modbus_errors: AtomicU64,
     /// Script executions counter
     script_executions: AtomicU64,
+    /// Script execution errors (v1.2.4)
+    script_errors: AtomicU64,
     /// Current offline queue size
     offline_queue_size: AtomicU64,
+    /// Offline queue capacity (v1.2.4)
+    offline_queue_capacity: AtomicU64,
+    /// Total messages queued offline (v1.2.4)
+    offline_total_queued: AtomicU64,
+    /// Total messages sent from offline queue (v1.2.4)
+    offline_total_sent: AtomicU64,
+    /// Number of Modbus clients (v1.2.4)
+    modbus_client_count: AtomicU64,
+    /// Number of loaded scripts (v1.2.4)
+    script_loaded_count: AtomicU64,
+    /// Number of active scripts (v1.2.4)
+    script_active_count: AtomicU64,
+    /// Number of FB instances (v1.2.4)
+    fb_instance_count: AtomicU64,
+    /// Recent errors buffer (v1.2.4)
+    recent_errors: std::sync::RwLock<Vec<String>>,
+    /// Config diagnostics (v1.2.4)
+    config_diagnostics: std::sync::RwLock<Option<ConfigDiagnostics>>,
 }
 
 impl HealthState {
@@ -111,8 +292,19 @@ impl HealthState {
                 mqtt_sent: AtomicU64::new(0),
                 mqtt_received: AtomicU64::new(0),
                 modbus_reads: AtomicU64::new(0),
+                modbus_errors: AtomicU64::new(0),
                 script_executions: AtomicU64::new(0),
+                script_errors: AtomicU64::new(0),
                 offline_queue_size: AtomicU64::new(0),
+                offline_queue_capacity: AtomicU64::new(1000),
+                offline_total_queued: AtomicU64::new(0),
+                offline_total_sent: AtomicU64::new(0),
+                modbus_client_count: AtomicU64::new(0),
+                script_loaded_count: AtomicU64::new(0),
+                script_active_count: AtomicU64::new(0),
+                fb_instance_count: AtomicU64::new(0),
+                recent_errors: std::sync::RwLock::new(Vec::with_capacity(10)),
+                config_diagnostics: std::sync::RwLock::new(None),
             }),
         }
     }
@@ -161,9 +353,78 @@ impl HealthState {
         self.inner.script_executions.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Increment Modbus errors counter (v1.2.4)
+    pub fn inc_modbus_errors(&self) {
+        self.inner.modbus_errors.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment script errors counter (v1.2.4)
+    pub fn inc_script_errors(&self) {
+        self.inner.script_errors.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Set Modbus client count (v1.2.4)
+    pub fn set_modbus_client_count(&self, count: usize) {
+        self.inner
+            .modbus_client_count
+            .store(count as u64, Ordering::Release);
+    }
+
+    /// Set script counts (v1.2.4)
+    pub fn set_script_counts(&self, loaded: usize, active: usize) {
+        self.inner
+            .script_loaded_count
+            .store(loaded as u64, Ordering::Release);
+        self.inner
+            .script_active_count
+            .store(active as u64, Ordering::Release);
+    }
+
+    /// Set FB instance count (v1.2.4)
+    pub fn set_fb_instance_count(&self, count: usize) {
+        self.inner
+            .fb_instance_count
+            .store(count as u64, Ordering::Release);
+    }
+
     /// Set offline queue size
     pub fn set_offline_queue_size(&self, size: u64) {
         self.inner.offline_queue_size.store(size, Ordering::Release);
+    }
+
+    /// Set offline queue capacity (v1.2.4)
+    pub fn set_offline_queue_capacity(&self, capacity: u64) {
+        self.inner
+            .offline_queue_capacity
+            .store(capacity, Ordering::Release);
+    }
+
+    /// Increment offline messages queued (v1.2.4)
+    pub fn inc_offline_queued(&self) {
+        self.inner.offline_total_queued.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment offline messages sent (v1.2.4)
+    pub fn inc_offline_sent(&self) {
+        self.inner.offline_total_sent.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Add an error to the recent errors buffer (v1.2.4)
+    pub fn add_error(&self, error: impl Into<String>) {
+        if let Ok(mut errors) = self.inner.recent_errors.write() {
+            if errors.len() >= 10 {
+                errors.remove(0);
+            }
+            let timestamp = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+            errors.push(format!("[{}] {}", timestamp, error.into()));
+        }
+    }
+
+    /// Set configuration diagnostics (v1.2.4)
+    pub fn set_config_diagnostics(&self, diag: ConfigDiagnostics) {
+        if let Ok(mut config) = self.inner.config_diagnostics.write() {
+            *config = Some(diag);
+        }
     }
 
     /// Check if ready (all components initialized)
@@ -212,6 +473,128 @@ impl HealthState {
             offline_queue_size: self.inner.offline_queue_size.load(Ordering::Acquire),
         }
     }
+
+    /// Get comprehensive diagnostics response (v1.2.4)
+    pub fn diagnostics(&self) -> DiagnosticsResponse {
+        use sysinfo::{Disks, System};
+
+        // Collect system information
+        let mut sys = System::new_all();
+        sys.refresh_all();
+
+        let cpu_usage = sys.global_cpu_usage();
+        let total_memory = sys.total_memory();
+        let used_memory = sys.used_memory();
+
+        // Get disk info for root partition
+        let disks = Disks::new_with_refreshed_list();
+        let (disk_total, disk_available) = disks
+            .iter()
+            .find(|d| d.mount_point().to_string_lossy() == "/")
+            .map(|d| (d.total_space(), d.available_space()))
+            .unwrap_or((0, 0));
+
+        let disk_usage_percent = if disk_total > 0 {
+            ((disk_total - disk_available) as f32 / disk_total as f32) * 100.0
+        } else {
+            0.0
+        };
+
+        // Get process info
+        let pid = std::process::id();
+        let (proc_memory, thread_count) = sys
+            .process(sysinfo::Pid::from_u32(pid))
+            .map(|p| (p.memory(), 0u32)) // thread count not directly available
+            .unwrap_or((0, 0));
+
+        // Recent errors
+        let recent_errors = self
+            .inner
+            .recent_errors
+            .read()
+            .map(|e| e.clone())
+            .unwrap_or_default();
+
+        // Config diagnostics
+        let config = self
+            .inner
+            .config_diagnostics
+            .read()
+            .map(|c| c.clone())
+            .unwrap_or(None)
+            .unwrap_or(ConfigDiagnostics {
+                device_id: "not_configured".to_string(),
+                mqtt_host: "not_configured".to_string(),
+                modbus_device_count: 0,
+                gpio_mapping_count: 0,
+                telemetry_interval_secs: 0,
+            });
+
+        DiagnosticsResponse {
+            timestamp: chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+            version: env!("CARGO_PKG_VERSION"),
+            uptime_secs: self.uptime_secs(),
+            system: SystemDiagnostics {
+                os: System::long_os_version().unwrap_or_else(|| "unknown".to_string()),
+                hostname: System::host_name().unwrap_or_else(|| "unknown".to_string()),
+                cpu_count: sys.cpus().len(),
+                cpu_usage_percent: cpu_usage,
+                memory_total_bytes: total_memory,
+                memory_used_bytes: used_memory,
+                memory_usage_percent: if total_memory > 0 {
+                    (used_memory as f32 / total_memory as f32) * 100.0
+                } else {
+                    0.0
+                },
+                disk: DiskDiagnostics {
+                    total_bytes: disk_total,
+                    available_bytes: disk_available,
+                    usage_percent: disk_usage_percent,
+                },
+            },
+            process: ProcessDiagnostics {
+                pid,
+                memory_bytes: proc_memory,
+                thread_count,
+                start_time: chrono::Utc::now()
+                    .checked_sub_signed(chrono::Duration::seconds(self.uptime_secs() as i64))
+                    .map(|t| t.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+                    .unwrap_or_else(|| "unknown".to_string()),
+            },
+            components: ComponentDiagnostics {
+                mqtt: MqttDiagnostics {
+                    connected: self.inner.mqtt_connected.load(Ordering::Acquire),
+                    messages_sent: self.inner.mqtt_sent.load(Ordering::Acquire),
+                    messages_received: self.inner.mqtt_received.load(Ordering::Acquire),
+                    last_connected: None, // TODO: track last connection time
+                },
+                modbus: ModbusDiagnostics {
+                    client_count: self.inner.modbus_client_count.load(Ordering::Acquire) as usize,
+                    total_reads: self.inner.modbus_reads.load(Ordering::Acquire),
+                    read_errors: self.inner.modbus_errors.load(Ordering::Acquire),
+                    circuit_states: Vec::new(), // TODO: get from ModbusManager
+                },
+                scripts: ScriptDiagnostics {
+                    loaded_count: self.inner.script_loaded_count.load(Ordering::Acquire) as usize,
+                    active_count: self.inner.script_active_count.load(Ordering::Acquire) as usize,
+                    total_executions: self.inner.script_executions.load(Ordering::Acquire),
+                    execution_errors: self.inner.script_errors.load(Ordering::Acquire),
+                },
+                function_blocks: FunctionBlockDiagnostics {
+                    instance_count: self.inner.fb_instance_count.load(Ordering::Acquire) as usize,
+                    type_counts: std::collections::HashMap::new(), // TODO: get from FBRegistry
+                },
+                offline_queue: OfflineQueueDiagnostics {
+                    size: self.inner.offline_queue_size.load(Ordering::Acquire),
+                    capacity: self.inner.offline_queue_capacity.load(Ordering::Acquire),
+                    total_queued: self.inner.offline_total_queued.load(Ordering::Acquire),
+                    total_sent: self.inner.offline_total_sent.load(Ordering::Acquire),
+                },
+            },
+            config,
+            recent_errors,
+        }
+    }
 }
 
 impl Default for HealthState {
@@ -245,6 +628,7 @@ pub async fn start_health_server(
         .route("/health", get(health_handler))
         .route("/ready", get(ready_handler))
         .route("/metrics", get(metrics_handler))
+        .route("/diagnostics", get(diagnostics_handler))
         .with_state(state);
 
     info!("Starting health check server on {}", addr);
@@ -296,6 +680,13 @@ async fn metrics_handler(
     State(state): axum::extract::State<HealthState>,
 ) -> impl axum::response::IntoResponse {
     (axum::http::StatusCode::OK, axum::Json(state.metrics()))
+}
+
+#[cfg(feature = "health")]
+async fn diagnostics_handler(
+    State(state): axum::extract::State<HealthState>,
+) -> impl axum::response::IntoResponse {
+    (axum::http::StatusCode::OK, axum::Json(state.diagnostics()))
 }
 
 /// Simple TCP health check (no HTTP, just connection test)

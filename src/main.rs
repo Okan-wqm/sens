@@ -26,6 +26,8 @@ mod scripting;
 mod security; // v1.2.2: Security hardening utilities
 mod shutdown;
 mod telemetry;
+mod backup; // v1.2.4: Backup and restore functionality
+mod alarms; // v1.2.4: Alarm management (IEC 62682)
 
 use anyhow::{Context, Result};
 use std::sync::Arc;
