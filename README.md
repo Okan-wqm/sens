@@ -1,6 +1,22 @@
-# Suderra Edge Agent v1.2.3
+# Suderra Edge Agent v1.2.4
 
 Industrial IoT Edge Agent for aquaculture monitoring and control systems. Built with Rust for reliability, safety, and performance on resource-constrained edge devices.
+
+## What's New in v1.2.4
+
+- **Rust 2024 Edition**: Updated to Rust 2024 edition with `rust-version = "1.85"`
+- **Dependency Updates**: Major dependency version upgrades for January 2026 currency:
+  - `tokio`: 1.35 → 1.43
+  - `reqwest`: 0.11 → 0.12
+  - `rumqttc`: 0.24 → 0.25
+  - `rusqlite`: 0.31 → 0.34
+  - `axum`: 0.7 → 0.8
+  - `sysinfo`: 0.30 → 0.33
+  - `thiserror`: 1.0 → 2.0
+  - `opentelemetry` stack: 0.22 → 0.27
+  - `metrics` stack: 0.22 → 0.24
+- **sysinfo 0.33 API**: Updated refresh methods and temperature handling
+- **Pattern Matching**: Adapted to Rust 2024 implicit borrow semantics
 
 ## What's New in v1.2.3
 

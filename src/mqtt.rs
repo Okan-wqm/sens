@@ -497,7 +497,8 @@ impl MqttClient {
         };
 
         // Read client certificate and key for mTLS (optional)
-        let client_auth = if let (Some(ref cert_path), Some(ref key_path)) =
+        // v1.2.4: Rust 2024 edition - implicit borrowing in patterns
+        let client_auth = if let (Some(cert_path), Some(key_path)) =
             (&tls_config.client_cert_path, &tls_config.client_key_path)
         {
             let cert_bytes = std::fs::read(cert_path)

@@ -72,9 +72,10 @@ impl TelemetryCollector {
     async fn collect_and_publish(&mut self) -> anyhow::Result<()> {
         // Refresh system info
         self.system.refresh_all();
-        self.networks.refresh();
-        self.disks.refresh();
-        self.components.refresh();
+        // v1.2.4: sysinfo 0.33 API - false = don't remove unlisted entries
+        self.networks.refresh(false);
+        self.disks.refresh(false);
+        self.components.refresh(false);
 
         // Get config for what to include
         let config = {
@@ -162,10 +163,13 @@ impl TelemetryCollector {
     /// Get CPU temperature (Linux-specific)
     fn get_cpu_temperature(&self) -> Option<f32> {
         // Try using sysinfo components
+        // v1.2.4: sysinfo 0.33 - temperature() now returns Option<f32>
         for component in self.components.iter() {
             let label = component.label().to_lowercase();
             if label.contains("cpu") || label.contains("core") || label.contains("package") {
-                return Some(component.temperature());
+                if let Some(temp) = component.temperature() {
+                    return Some(temp);
+                }
             }
         }
 
