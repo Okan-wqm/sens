@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use tracing::{debug, error, info, warn};
+use tracing::{info, warn};
 
 /// Backup file magic header for verification
 const BACKUP_MAGIC: &[u8; 8] = b"SUDERRA\x00";

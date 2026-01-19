@@ -83,6 +83,7 @@ impl std::fmt::Debug for ActivationRequest {
 
 /// Activation response from cloud API (snake_case per v1.1 spec)
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct ActivationResponse {
     pub success: bool,
     pub mqtt_broker: String,
@@ -97,6 +98,7 @@ pub struct ActivationResponse {
 
 /// Error response from cloud API
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct ActivationErrorResponse {
     pub success: bool,
     pub error: String,

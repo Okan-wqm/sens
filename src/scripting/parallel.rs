@@ -1,5 +1,8 @@
 //! Parallel Branch Execution for SFC (IEC 61131-3)
 //!
+//! NOTE: This module is API-complete but not yet integrated into the script engine.
+#![allow(dead_code)]
+//!
 //! Supports parallel divergence and convergence patterns from
 //! Sequential Function Charts (SFC):
 //!

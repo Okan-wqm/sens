@@ -1,5 +1,9 @@
 //! Persistent Storage for RETAIN Variables (IEC 61131-3 Compliance)
 //!
+//! NOTE: Full persistence API is implemented. Some methods are for future
+//! batch operations and advanced script state management.
+#![allow(dead_code)]
+//!
 //! Provides SQLite-based persistence for:
 //! - RETAIN variables (survive power cycles)
 //! - Function block states (Timer elapsed, Counter values)

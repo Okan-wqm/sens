@@ -1,5 +1,9 @@
 //! Function Block Registry
 //!
+//! NOTE: Complete registry API. Some stats and query methods are for
+//! future monitoring and introspection features.
+#![allow(dead_code)]
+//!
 //! Manages function block instances for IEC 61131-3 compliance:
 //! - Instance lifecycle (create, destroy)
 //! - State persistence via SQLite

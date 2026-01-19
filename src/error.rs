@@ -1,5 +1,9 @@
 //! Error types for Suderra Edge Agent
 //!
+//! NOTE: Complete error hierarchy. Some variants and helpers are for future
+//! error handling paths and diagnostics.
+#![allow(dead_code)]
+//!
 //! ## Modbus Error Granularity (v1.2.0)
 //! Added detailed Modbus error types for better diagnostics and error handling.
 //! This enables callers to handle specific error conditions appropriately.

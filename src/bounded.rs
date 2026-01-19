@@ -1,5 +1,9 @@
 //! Bounded Collections Module
 //!
+//! NOTE: Complete bounded collection API for embedded/safety-critical use.
+//! Some methods are for direct buffer manipulation outside the agent core.
+#![allow(dead_code)]
+//!
 //! Provides stack-allocated, bounded collections using heapless crate.
 //! These prevent unbounded memory growth and are suitable for embedded
 //! environments where heap allocation should be minimized.

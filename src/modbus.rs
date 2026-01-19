@@ -63,10 +63,7 @@ const FC_READ_INPUT_REGISTERS: u8 = 4;
 const FC_WRITE_SINGLE_COIL: u8 = 5;
 /// FC 6: Write Single Register
 const FC_WRITE_SINGLE_REGISTER: u8 = 6;
-/// FC 15: Write Multiple Coils
-const FC_WRITE_MULTIPLE_COILS: u8 = 15;
-/// FC 16: Write Multiple Registers
-const FC_WRITE_MULTIPLE_REGISTERS: u8 = 16;
+// FC 15, 16 (Write Multiple) not implemented - use single writes
 
 // ============================================================================
 // Actor Pattern Types
@@ -448,11 +445,13 @@ impl ModbusClient {
     }
 
     /// Check if circuit breaker is open
+    #[allow(dead_code)]
     pub fn is_circuit_open(&self) -> bool {
         self.circuit_breaker.is_open()
     }
 
     /// Get circuit breaker state name
+    #[allow(dead_code)]
     pub fn circuit_state(&self) -> &'static str {
         self.circuit_breaker.state_name()
     }
@@ -677,6 +676,7 @@ impl ModbusClient {
     }
 
     /// Check if connected
+    #[allow(dead_code)]
     pub fn is_connected(&self) -> bool {
         self.channel.is_some()
     }
@@ -1132,6 +1132,7 @@ impl ModbusManager {
     }
 
     /// Get client by device name (acquires lock)
+    #[allow(dead_code)]
     pub async fn get_client_locked(
         &self,
         name: &str,
@@ -1151,6 +1152,7 @@ impl ModbusManager {
     /// This sync version uses try_lock and may return None if locks are contested.
     ///
     /// v1.2.3: Added retry logic for contested locks
+    #[allow(dead_code)]
     pub fn get_client(&self, name: &str) -> Option<Arc<Mutex<ModbusClient>>> {
         // v1.2.3: Retry multiple times if locks are contested
         for _attempt in 0..3 {
@@ -1188,6 +1190,7 @@ impl ModbusManager {
     }
 
     /// Get circuit breaker status for all devices
+    #[allow(dead_code)]
     pub async fn circuit_status(&self) -> Vec<(String, &'static str)> {
         let mut results = Vec::new();
         for client_arc in &self.clients {
@@ -1198,6 +1201,7 @@ impl ModbusManager {
     }
 
     /// Reconfigure with new device configs (hot-reload)
+    #[allow(dead_code)]
     pub async fn reconfigure(&mut self, new_configs: Vec<ModbusDeviceConfig>) {
         info!(
             "Reconfiguring Modbus manager with {} devices",

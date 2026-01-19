@@ -68,6 +68,7 @@ impl RateLimiter {
     }
 
     /// Get current command count in window
+    #[allow(dead_code)]
     fn current_count(&self) -> usize {
         self.timestamps.len()
     }

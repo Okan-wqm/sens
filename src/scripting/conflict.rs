@@ -304,6 +304,7 @@ impl ConflictDetector {
     }
 
     /// Get summary of all pending writes (for debugging)
+    #[allow(dead_code)]
     pub fn get_pending_summary(&self) -> String {
         let gpio_count = self.gpio_writes.len();
         let modbus_count = self.modbus_writes.len();

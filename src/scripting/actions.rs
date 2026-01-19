@@ -126,6 +126,7 @@ pub struct ActionCondition {
 
 /// Action execution result
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ActionResult {
     pub success: bool,
     pub action_type: ActionType,
@@ -152,6 +153,7 @@ impl ActionResult {
         }
     }
 
+    #[allow(dead_code)]
     pub fn with_details(mut self, details: Value) -> Self {
         self.details = Some(details);
         self

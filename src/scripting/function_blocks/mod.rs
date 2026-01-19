@@ -1,5 +1,9 @@
 //! IEC 61131-3 Function Blocks
 //!
+//! NOTE: Function blocks are API-complete. Some methods are for direct instantiation
+//! while the script engine uses the FBRegistry for dynamic dispatch.
+#![allow(dead_code)]
+//!
 //! Standard function blocks for industrial automation:
 //! - Timers: TON (On-Delay), TOF (Off-Delay), TP (Pulse)
 //! - Counters: CTU (Up), CTD (Down), CTUD (Up/Down)

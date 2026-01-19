@@ -1,5 +1,9 @@
 //! Graceful Shutdown Coordinator
 //!
+//! NOTE: Full shutdown coordination API. Some helpers are for advanced
+//! task management patterns.
+#![allow(dead_code)]
+//!
 //! Manages proper shutdown sequence for all agent components:
 //! 1. Signal all tasks to stop
 //! 2. Wait for in-flight operations

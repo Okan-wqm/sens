@@ -1,5 +1,9 @@
 //! Script Execution Limits
 //!
+//! NOTE: Full safety limits API. Some tracking methods are for future
+//! monitoring dashboards and diagnostics.
+#![allow(dead_code)]
+//!
 //! Provides safety limits for edge scripts to prevent:
 //! - Runaway scripts (execution time limit)
 //! - Action spam (rate limiting)

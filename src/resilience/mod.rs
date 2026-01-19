@@ -1,5 +1,8 @@
 //! Resilience patterns for fault tolerance
 //!
+//! NOTE: Some helper methods are API-complete but not yet used by all consumers.
+#![allow(dead_code)]
+//!
 //! Provides:
 //! - Circuit Breaker pattern for failing services
 //! - Timeout wrappers for async operations

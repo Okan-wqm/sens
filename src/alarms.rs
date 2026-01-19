@@ -16,7 +16,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 /// Maximum number of alarms to keep in history
 const MAX_ALARM_HISTORY: usize = 1000;

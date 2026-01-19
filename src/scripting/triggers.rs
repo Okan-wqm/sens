@@ -391,6 +391,7 @@ impl TriggerManager {
     }
 
     /// Reset trigger state for a script
+    #[allow(dead_code)]
     pub fn reset_script(&mut self, script_id: &str) {
         let prefix = format!("{}:", script_id);
         self.states.retain(|k, _| !k.starts_with(&prefix));

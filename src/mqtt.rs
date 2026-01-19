@@ -147,6 +147,7 @@ pub struct GpioPinData {
 
 /// Command message (received from cloud)
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct CommandMessage {
     pub command_id: String,
     pub command: String,

@@ -168,6 +168,7 @@ impl GpioHandle {
     ///
     /// Uses exponential backoff when channel is full.
     /// Returns error after all retries exhausted.
+    #[allow(dead_code)]
     async fn send_with_retry(&self, cmd: GpioCommand) -> Result<(), String> {
         // First try blocking send (most efficient for normal operation)
         match self.sender.send(cmd).await {

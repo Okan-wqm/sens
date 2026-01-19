@@ -11,6 +11,10 @@
 //! - Scan cycle execution mode (PLC-like)
 //! - Function block integration
 //! - Deterministic execution timing
+//!
+//! NOTE: Complete script engine API. Many methods are for direct script
+//! management and are called via commands/MQTT, not from main.rs directly.
+#![allow(dead_code)]
 
 use chrono::Utc;
 use serde_json::{Value, json};
@@ -35,6 +39,7 @@ use crate::gpio::PinState;
 
 /// Script execution result
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ExecutionResult {
     pub script_id: String,
     pub success: bool,
@@ -175,6 +180,7 @@ impl ScriptEngine {
 
     /// Create with custom limits
     /// v2.2: Now async to get shared storage from AppState
+    #[allow(dead_code)]
     pub async fn with_limits(state: Arc<RwLock<AppState>>, limits: ScriptLimits) -> Self {
         let storage = {
             let state_guard = state.read().await;
@@ -203,6 +209,7 @@ impl ScriptEngine {
 
     /// Create with persistence support (IEC 61131-3 RETAIN variables)
     /// v2.2: Now async to get shared storage from AppState
+    #[allow(dead_code)]
     pub async fn with_persistence(
         state: Arc<RwLock<AppState>>,
         persistence: Arc<SqlitePersistence>,
@@ -235,6 +242,7 @@ impl ScriptEngine {
 
     /// Create with scan cycle mode (IEC 61131-3 PLC-like execution)
     /// v2.2: Now async to get shared storage from AppState
+    #[allow(dead_code)]
     pub async fn with_scan_cycle(
         state: Arc<RwLock<AppState>>,
         scan_cycle_ms: u64,
@@ -282,6 +290,7 @@ impl ScriptEngine {
     }
 
     /// Get current execution mode
+    #[allow(dead_code)]
     pub fn execution_mode(&self) -> ExecutionMode {
         self.execution_mode
     }
@@ -296,31 +305,37 @@ impl ScriptEngine {
     }
 
     /// Get scan cycle time
+    #[allow(dead_code)]
     pub fn scan_cycle_ms(&self) -> u64 {
         self.scan_cycle_ms
     }
 
     /// Get scan cycle statistics
+    #[allow(dead_code)]
     pub fn scan_stats(&self) -> &ScanCycleStats {
         &self.scan_stats
     }
 
     /// Get function block registry
+    #[allow(dead_code)]
     pub fn fb_registry(&self) -> &FBRegistry {
         &self.fb_registry
     }
 
     /// Get mutable function block registry
+    #[allow(dead_code)]
     pub fn fb_registry_mut(&mut self) -> &mut FBRegistry {
         &mut self.fb_registry
     }
 
     /// Register a function block
+    #[allow(dead_code)]
     pub fn register_fb(&mut self, def: FBDefinition) -> Result<(), super::FBRegistryError> {
         self.fb_registry.create_fb(def)
     }
 
     /// Set persistence after construction
+    #[allow(dead_code)]
     pub fn set_persistence(&mut self, persistence: Arc<SqlitePersistence>) {
         self.persistence = Some(persistence.clone());
         self.fb_registry.set_persistence(persistence);

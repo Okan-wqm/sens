@@ -82,6 +82,7 @@ impl ScriptContext {
     /// * `offset_secs` - Timezone offset in seconds from UTC
     ///   - Positive values = east of UTC (e.g., +3600 = UTC+1)
     ///   - Negative values = west of UTC (e.g., -18000 = UTC-5)
+    #[allow(dead_code)]
     pub fn with_timezone(offset_secs: i32) -> Self {
         Self {
             timezone_offset_secs: offset_secs,
@@ -90,6 +91,7 @@ impl ScriptContext {
     }
 
     /// Set timezone offset (v1.2.1 - issue #22)
+    #[allow(dead_code)]
     pub fn set_timezone(&mut self, offset_secs: i32) {
         self.timezone_offset_secs = offset_secs;
     }
