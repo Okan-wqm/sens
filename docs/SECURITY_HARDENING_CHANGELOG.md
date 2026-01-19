@@ -1,7 +1,7 @@
 # Edge-Agent Security Hardening Changelog
 
 **Date**: 2026-01-19
-**Version**: 1.2.6
+**Version**: 1.3.0
 **Author**: Claude Code
 
 ---
@@ -1658,6 +1658,179 @@ cargo build --release
 3. **Rate Limiting**: Default rate limit is 60 commands/minute. Adjust `RATE_LIMIT_MAX_COMMANDS` if needed for high-frequency deployments.
 
 4. **Signal Handling**: Applications using `kill -TERM <pid>` will now trigger graceful shutdown instead of immediate termination.
+
+---
+
+---
+
+## PHASE 17: v1.3.0 PLC Programming Bug Fixes
+
+**Date**: 2026-01-19
+**Version**: 1.3.0
+
+### 17.1 Codesys Payload Offset Bug
+**File**: `src/plc_programming/codesys.rs`
+**Severity**: CRITICAL (Protocol Corruption)
+**Issue**: Protocol header bytes were incorrectly indexed, causing payload parsing failures
+
+**Fix**: Corrected byte offsets and header size:
+```rust
+// Before (WRONG)
+let payload_len = u32::from_le_bytes([data[10], data[11], data[12], data[13]]);
+let mut header = [0u8; 14];
+
+// After (CORRECT)
+// Header: magic[0:4] + length[4:8] + service_id[8:10] + reserved[10:12] + payload_len[12:16]
+let payload_len = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
+let mut header = [0u8; 16];  // Full 16-byte header
+```
+
+**Impact**: Codesys V3 protocol communication now works correctly
+
+---
+
+### 17.2 S7 Start/Stop Same Parameter Bug
+**File**: `src/plc_programming/s7comm.rs:427`
+**Severity**: CRITICAL (Functionality)
+**Issue**: Both start and stop operations sent identical `P_PROGRAM` parameter
+
+**Fix**: Use correct parameter for each operation:
+```rust
+// Before (WRONG - both used same parameter)
+let param: &[u8] = if start { b"P_PROGRAM" } else { b"P_PROGRAM" };
+
+// After (CORRECT)
+let param: &[u8] = if start { b"P_PROGRAM" } else { b"_STOP" };
+```
+
+**Impact**: PLC stop command now actually stops the CPU
+
+---
+
+### 17.3 Codesys Lost Warnings Data
+**File**: `src/plc_programming/codesys.rs:499-530`
+**Severity**: HIGH (Data Loss)
+**Issue**: Warnings collected during upload but never included in response
+
+**Fix**: Return collected warnings in result:
+```rust
+// Before (WRONG - warnings lost)
+let (success, _warnings, errors) = ...;
+UploadResult { warnings: Vec::new(), ... }
+
+// After (CORRECT)
+let (success, warnings, errors) = ...;
+UploadResult { warnings, ... }  // Uses collected warnings
+```
+
+**Impact**: Upload warnings now visible in API response
+
+---
+
+### 17.4 Hardcoded Default Credentials
+**File**: `src/plc_programming/codesys.rs:325-333`
+**Severity**: HIGH (Security)
+**Issue**: Default `admin` username hardcoded in code (IEC 62443 violation)
+
+**Fix**: Anonymous login with warning instead of hardcoded defaults:
+```rust
+// Before (SECURITY RISK)
+let username = self.config.username.as_deref().unwrap_or("admin");
+let password = self.config.password.as_deref().unwrap_or("");
+
+// After (SECURE)
+let username = match &self.config.username {
+    Some(u) => u.as_str(),
+    None => {
+        warn!("No username configured - using anonymous login");
+        ""
+    }
+};
+```
+
+**Impact**: No hardcoded credentials in production code
+
+---
+
+### 17.5 OPC UA IPv6 URL Parsing
+**File**: `src/plc_programming/opcua.rs:428-448`
+**Severity**: HIGH (Functionality)
+**Issue**: `rfind(':')` finds wrong colon in IPv6 addresses like `[::1]:4840`
+
+**Fix**: Handle RFC 3986 bracket notation properly:
+```rust
+// Before (BROKEN for IPv6)
+if let Some(colon_pos) = host_port.rfind(':') {
+    let host = &host_port[..colon_pos];
+    let port = &host_port[colon_pos + 1..];
+}
+
+// After (CORRECT)
+if host_port.starts_with('[') {
+    // IPv6: [::1]:4840 or [2001:db8::1]:4840
+    if let Some(bracket_end) = host_port.find(']') {
+        let host = &host_port[1..bracket_end];  // Remove brackets
+        let after_bracket = &host_port[bracket_end + 1..];
+        let port = if after_bracket.starts_with(':') {
+            after_bracket[1..].parse().unwrap_or(DEFAULT_OPCUA_PORT)
+        } else {
+            DEFAULT_OPCUA_PORT
+        };
+        Ok((host.to_string(), port))
+    }
+} else {
+    // IPv4 or hostname - use rfind(':')
+}
+```
+
+**Impact**: OPC UA connections to IPv6 addresses now work
+
+---
+
+### 17.6 Unused Import Cleanup
+**Files**: `src/plc_programming/*.rs`, `src/commands.rs`
+**Severity**: LOW (Code Quality)
+**Issue**: Multiple unused imports causing compiler warnings
+
+**Fix**: Removed unused imports:
+- `codesys.rs`: Removed unused `error` from tracing
+- `s7comm.rs`: Removed unused `error` from tracing
+- `opcua.rs`: Removed unused `error` from tracing
+- `ethernet_ip.rs`: Removed unused `error` from tracing
+- `ads.rs`: Removed unused `debug`, `error` from tracing
+- `common.rs`: Removed unused `debug` from tracing
+- `commands.rs`: Removed unused `PlcProgrammingConfig`
+
+**Impact**: Clean compilation without warnings
+
+---
+
+## v1.3.0 Files Modified
+
+| File | Changes |
+|------|---------|
+| `src/plc_programming/codesys.rs` | Payload offset fix, warnings fix, credentials fix, imports cleanup |
+| `src/plc_programming/s7comm.rs` | Start/stop parameter fix, imports cleanup |
+| `src/plc_programming/opcua.rs` | IPv6 URL parsing, imports cleanup |
+| `src/plc_programming/ethernet_ip.rs` | Imports cleanup |
+| `src/plc_programming/ads.rs` | Imports cleanup |
+| `src/plc_programming/common.rs` | Imports cleanup |
+| `src/commands.rs` | Imports cleanup |
+
+---
+
+## v1.3.0 Security Impact Summary
+
+| Issue | Severity | Status |
+|-------|----------|--------|
+| Codesys payload offset | CRITICAL | Fixed |
+| S7 start/stop parameter | CRITICAL | Fixed |
+| Codesys lost warnings | HIGH | Fixed |
+| Hardcoded credentials | HIGH | Fixed |
+| IPv6 URL parsing | HIGH | Fixed |
+| Unused imports | LOW | Fixed |
+
+**Total: 6 issues fixed in v1.3.0 PLC Programming Module**
 
 ---
 

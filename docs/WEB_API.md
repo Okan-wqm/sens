@@ -1,6 +1,6 @@
 # Suderra Edge Agent - Web API Reference
 
-**Version**: 1.3.0
+**Version**: 1.3.0 (PLC Programming Edition)
 **Platform**: Raspberry Pi / Revolution Pi / Generic Linux
 **Protocol**: MQTT 3.1.1 + HTTP Health API
 
@@ -928,6 +928,31 @@ Delete program from PLC.
 - **Network**: Ensure proper firewall rules for PLC ports
 - **Audit**: All program uploads are logged with timestamp and user
 - **IEC 62443**: Compliance for industrial network security
+- **No Hardcoded Credentials**: Anonymous login when credentials not configured (with warning)
+
+### 5.7 Protocol Implementation Notes (v1.3.0)
+
+#### Codesys V3 Gateway
+- Header structure: 16 bytes (magic[4] + length[4] + service_id[2] + reserved[2] + payload_len[4])
+- Response parsing uses bytes 12-15 for payload length
+- Warnings collected during upload are properly returned in response
+
+#### Siemens S7comm
+- Start CPU uses `P_PROGRAM` parameter
+- Stop CPU uses `_STOP` parameter
+- Supports S7-300/400/1200/1500 series
+
+#### OPC UA
+- IPv6 addresses supported with RFC 3986 bracket notation: `opc.tcp://[::1]:4840`
+- IPv4 and hostnames use standard `host:port` format
+
+#### EtherNet/IP CIP
+- Connection path format: `slot/connection_path`
+- Assembly instance uploads for program transfer
+
+#### ADS/AMS
+- AMS Net ID format: `x.x.x.x.x.x` (6 octets)
+- Boot project deployment via ADS file transfer
 
 ---
 

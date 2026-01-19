@@ -1,4 +1,4 @@
-# Suderra Edge Agent Architecture v1.2.4
+# Suderra Edge Agent Architecture v1.3.0
 
 ## Overview
 
@@ -19,6 +19,8 @@ The Suderra Edge Agent is a Rust-based industrial IoT agent designed for aquacul
 - **v1.2.4: TLS certificate expiry monitoring**
 - **v1.2.4: Webhook action for external integrations**
 - **v1.2.4: SQLite VACUUM INTO backup**
+- **v1.3.0: PLC Programming protocols (Codesys, S7comm, OPC UA, EtherNet/IP, ADS)**
+- **v1.3.0: Remote PLC control via MQTT commands**
 
 ## Architecture Diagram (v2.0)
 
@@ -415,6 +417,65 @@ scripting:
 - MQTT reconnection with exponential backoff
 - Graceful shutdown on SIGTERM/SIGINT
 
+## PLC Programming Module (v1.3.0)
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    PLC Programming Module                        │
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │                    PlcProgrammer Trait                    │   │
+│  │   upload_program() | get_status() | start() | stop()     │   │
+│  │   list_programs() | download_program() | delete_program() │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                              │                                   │
+│  ┌──────────┬────────────┬───┴───┬─────────────┬────────────┐   │
+│  │ Codesys  │  S7comm    │ OPC UA│ EtherNet/IP │    ADS     │   │
+│  │  V3 GW   │ S7-300/400 │ 62541 │     CIP     │   AMS      │   │
+│  │ :1217    │ S7-1200/1500│ :4840 │   :44818    │  :48898    │   │
+│  └──────────┴────────────┴───────┴─────────────┴────────────┘   │
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │                     Common Utilities                      │   │
+│  │  validate_program() | parse_st_variables() | sanitize()  │   │
+│  │  data_type_size() | with_timeout() | audit_log()         │   │
+│  └──────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Supported Protocols
+
+| Protocol | Target PLCs | Port | Auth |
+|----------|------------|------|------|
+| Codesys V3 | WAGO, Festo, Schneider | 1217 | User/Pass |
+| S7comm | Siemens S7-300/400/1200/1500 | 102 | None |
+| OPC UA | IEC 62541 compliant | 4840 | User/Pass, Cert |
+| EtherNet/IP | Allen-Bradley | 44818 | None |
+| ADS/AMS | Beckhoff TwinCAT | 48898 | None |
+
+### Command Flow
+
+```
+MQTT Command → commands.rs → PlcProgrammer::upload_program()
+                                    │
+                    ┌───────────────┼───────────────┐
+                    ↓               ↓               ↓
+              connect()      send_program()    audit_log()
+                    │               │               │
+                    └───────────────┼───────────────┘
+                                    ↓
+                            MQTT Response
+```
+
+### Security (IEC 62443)
+
+- No hardcoded credentials (anonymous login with warning)
+- Audit logging of all program operations
+- Protocol-specific authentication when configured
+- IPv4 and IPv6 support (RFC 3986 bracket notation)
+
 ## Security Considerations
 
 1. **Config File Permissions**: `/etc/suderra/config.yaml` should be `chmod 600`
@@ -423,3 +484,4 @@ scripting:
 4. **No Arbitrary Shell Commands**: Only whitelisted commands executed
 5. **Tenant Isolation**: MQTT topics prefixed with tenant ID
 6. **Script Sandboxing**: Execution limits prevent resource exhaustion
+7. **PLC Programming**: No default credentials, audit trail for all uploads
