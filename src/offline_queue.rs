@@ -680,6 +680,67 @@ impl OfflineQueue {
 
         Ok(None)
     }
+
+    /// Run SQLite integrity check (v1.2.4)
+    ///
+    /// Performs PRAGMA integrity_check to verify database consistency.
+    /// Returns Ok(true) if database is healthy, Ok(false) if corruption detected.
+    ///
+    /// # SRE Note
+    /// Run this periodically (e.g., daily or on startup) to detect corruption early.
+    /// If corruption is detected, restore from backup and investigate root cause.
+    pub fn integrity_check(&self) -> Result<IntegrityCheckResult> {
+        let conn = self.conn.lock().map_err(|e| {
+            anyhow::anyhow!("Failed to lock database connection: {}", e)
+        })?;
+
+        let mut stmt = conn.prepare("PRAGMA integrity_check")?;
+        let results: Vec<String> = stmt
+            .query_map([], |row: &rusqlite::Row| row.get(0))?
+            .filter_map(|r: std::result::Result<String, _>| r.ok())
+            .collect();
+
+        let is_ok = results.len() == 1 && results[0] == "ok";
+
+        if is_ok {
+            info!("SQLite integrity check passed");
+            Ok(IntegrityCheckResult {
+                is_healthy: true,
+                errors: vec![],
+            })
+        } else {
+            error!(
+                errors = ?results,
+                "SQLite integrity check FAILED - database may be corrupted"
+            );
+            Ok(IntegrityCheckResult {
+                is_healthy: false,
+                errors: results,
+            })
+        }
+    }
+
+    /// Quick integrity check using PRAGMA quick_check (v1.2.4)
+    ///
+    /// Faster than full integrity_check but less thorough.
+    /// Good for frequent checks (e.g., after each restart).
+    pub fn quick_check(&self) -> Result<bool> {
+        let conn = self.conn.lock().map_err(|e| {
+            anyhow::anyhow!("Failed to lock database connection: {}", e)
+        })?;
+
+        let result: String = conn.query_row("PRAGMA quick_check", [], |row: &rusqlite::Row| row.get(0))?;
+        Ok(result == "ok")
+    }
+}
+
+/// Result of SQLite integrity check
+#[derive(Debug, Clone)]
+pub struct IntegrityCheckResult {
+    /// True if database passed all checks
+    pub is_healthy: bool,
+    /// List of errors found (empty if healthy)
+    pub errors: Vec<String>,
 }
 
 // ============================================================================
@@ -814,6 +875,24 @@ impl AsyncOfflineQueue {
         let queue = self.inner.clone();
 
         tokio::task::spawn_blocking(move || queue.vacuum_if_needed())
+            .await
+            .map_err(|e| anyhow::anyhow!("spawn_blocking join error: {}", e))?
+    }
+
+    /// Async integrity check - verify database consistency
+    pub async fn integrity_check_async(&self) -> Result<IntegrityCheckResult> {
+        let queue = self.inner.clone();
+
+        tokio::task::spawn_blocking(move || queue.integrity_check())
+            .await
+            .map_err(|e| anyhow::anyhow!("spawn_blocking join error: {}", e))?
+    }
+
+    /// Async quick check - fast database health check
+    pub async fn quick_check_async(&self) -> Result<bool> {
+        let queue = self.inner.clone();
+
+        tokio::task::spawn_blocking(move || queue.quick_check())
             .await
             .map_err(|e| anyhow::anyhow!("spawn_blocking join error: {}", e))?
     }
@@ -1022,5 +1101,25 @@ mod tests {
         let cleared = queue.clear().unwrap();
         assert_eq!(cleared, 10);
         assert!(queue.is_empty());
+    }
+
+    #[test]
+    fn test_integrity_check() {
+        let queue = OfflineQueue::in_memory(100).unwrap();
+
+        // Fresh database should pass integrity check
+        let result = queue.integrity_check().unwrap();
+        assert!(result.is_healthy);
+        assert!(result.errors.is_empty());
+
+        // Quick check should also pass
+        assert!(queue.quick_check().unwrap());
+
+        // Add some data and check again
+        queue
+            .enqueue("test", "payload", MessagePriority::Normal, 1, false)
+            .unwrap();
+        let result2 = queue.integrity_check().unwrap();
+        assert!(result2.is_healthy);
     }
 }

@@ -53,6 +53,14 @@ pub struct Action {
     #[serde(default)]
     pub script_id: Option<String>,
 
+    /// URL for webhook actions (v1.2.4)
+    #[serde(default)]
+    pub url: Option<String>,
+
+    /// HTTP method for webhook (default: POST)
+    #[serde(default)]
+    pub method: Option<String>,
+
     /// Condition for this action (optional - if false, skip action)
     #[serde(default)]
     pub condition: Option<ActionCondition>,
@@ -87,6 +95,8 @@ pub enum ActionType {
     CallScript,
     /// Publish MQTT message
     PublishMqtt,
+    /// Send HTTP webhook (v1.2.4) - for PagerDuty, Slack, etc.
+    Webhook,
     /// No operation (for conditional skipping)
     Noop,
 }

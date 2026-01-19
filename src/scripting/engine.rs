@@ -1218,6 +1218,7 @@ impl ScriptEngine {
             ActionType::Delay => self.action_delay(action).await,
             ActionType::PublishMqtt => self.action_publish_mqtt(action).await,
             ActionType::CallScript => self.action_call_script_with_depth(action, depth).await,
+            ActionType::Webhook => self.action_webhook(action).await,
             ActionType::Noop => ActionResult::success(ActionType::Noop, "No operation"),
         }
     }
@@ -1610,6 +1611,91 @@ impl ScriptEngine {
     #[allow(dead_code)]
     async fn action_call_script(&mut self, action: &Action) -> ActionResult {
         self.action_call_script_with_depth(action, 0).await
+    }
+
+    /// Send HTTP webhook (v1.2.4)
+    ///
+    /// Sends an HTTP request to external services like PagerDuty, Slack, etc.
+    /// Supports variable interpolation in URL and message body.
+    ///
+    /// # Example Action
+    /// ```json
+    /// {
+    ///   "type": "webhook",
+    ///   "url": "https://hooks.slack.com/services/XXX",
+    ///   "message": "{\"text\": \"Alert: ${message}\"}",
+    ///   "method": "POST"
+    /// }
+    /// ```
+    async fn action_webhook(&mut self, action: &Action) -> ActionResult {
+        let url = match &action.url {
+            Some(u) => self.context.interpolate(u),
+            None => return ActionResult::failure(ActionType::Webhook, "Missing URL"),
+        };
+
+        // Validate URL format
+        if !url.starts_with("http://") && !url.starts_with("https://") {
+            return ActionResult::failure(ActionType::Webhook, "Invalid URL scheme (must be http or https)");
+        }
+
+        let method = action.method.as_deref().unwrap_or("POST").to_uppercase();
+        let body = action.message.as_ref().map(|m| self.context.interpolate(m));
+
+        info!(
+            url = %url,
+            method = %method,
+            "Sending webhook"
+        );
+
+        // Use reqwest for HTTP
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build();
+
+        let client = match client {
+            Ok(c) => c,
+            Err(e) => return ActionResult::failure(ActionType::Webhook, format!("Failed to create HTTP client: {}", e)),
+        };
+
+        let request = match method.as_str() {
+            "GET" => client.get(&url),
+            "POST" => {
+                let mut req = client.post(&url);
+                if let Some(ref b) = body {
+                    req = req.header("Content-Type", "application/json").body(b.to_string());
+                }
+                req
+            }
+            "PUT" => {
+                let mut req = client.put(&url);
+                if let Some(ref b) = body {
+                    req = req.header("Content-Type", "application/json").body(b.to_string());
+                }
+                req
+            }
+            _ => return ActionResult::failure(ActionType::Webhook, format!("Unsupported HTTP method: {}", method)),
+        };
+
+        match request.send().await {
+            Ok(response) => {
+                let status = response.status();
+                if status.is_success() {
+                    ActionResult::success(
+                        ActionType::Webhook,
+                        format!("Webhook sent successfully ({})", status.as_u16()),
+                    )
+                } else {
+                    ActionResult::failure(
+                        ActionType::Webhook,
+                        format!("Webhook failed with status {}", status.as_u16()),
+                    )
+                }
+            }
+            Err(e) => ActionResult::failure(
+                ActionType::Webhook,
+                format!("Webhook request failed: {}", e),
+            ),
+        }
     }
 
     // === Public API for script management ===

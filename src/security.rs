@@ -223,12 +223,252 @@ pub fn monotonic_millis() -> u64 {
 }
 
 // ============================================================================
+// TLS Certificate Expiry Monitoring (v1.2.4)
+// ============================================================================
+
+use chrono::{DateTime, Utc};
+use tracing::{error, info};
+
+/// Certificate expiry information
+#[derive(Debug, Clone)]
+pub struct CertificateExpiry {
+    /// Path to the certificate file
+    pub path: String,
+    /// Expiry date (if parsed successfully)
+    pub expiry_date: Option<DateTime<Utc>>,
+    /// Days until expiry (negative if expired)
+    pub days_remaining: Option<i64>,
+    /// Human-readable status
+    pub status: CertExpiryStatus,
+    /// Error message if check failed
+    pub error: Option<String>,
+}
+
+/// Certificate expiry status levels
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CertExpiryStatus {
+    /// More than 30 days remaining
+    Ok,
+    /// 14-30 days remaining
+    Warning,
+    /// 7-14 days remaining
+    Critical,
+    /// Less than 7 days remaining
+    Urgent,
+    /// Certificate has expired
+    Expired,
+    /// Could not check (file not found, parse error, etc.)
+    Unknown,
+}
+
+impl std::fmt::Display for CertExpiryStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CertExpiryStatus::Ok => write!(f, "OK"),
+            CertExpiryStatus::Warning => write!(f, "WARNING"),
+            CertExpiryStatus::Critical => write!(f, "CRITICAL"),
+            CertExpiryStatus::Urgent => write!(f, "URGENT"),
+            CertExpiryStatus::Expired => write!(f, "EXPIRED"),
+            CertExpiryStatus::Unknown => write!(f, "UNKNOWN"),
+        }
+    }
+}
+
+/// Check certificate expiry using openssl command
+///
+/// Returns certificate expiry information including days remaining.
+/// Uses `openssl x509 -enddate` which is available on most Linux systems.
+#[cfg(unix)]
+pub fn check_certificate_expiry(cert_path: &str) -> CertificateExpiry {
+    use std::process::Command;
+
+    let path = std::path::Path::new(cert_path);
+
+    // Check file exists
+    if !path.exists() {
+        return CertificateExpiry {
+            path: cert_path.to_string(),
+            expiry_date: None,
+            days_remaining: None,
+            status: CertExpiryStatus::Unknown,
+            error: Some("Certificate file not found".to_string()),
+        };
+    }
+
+    // Use openssl to get expiry date
+    let output = Command::new("openssl")
+        .args(["x509", "-enddate", "-noout", "-in", cert_path])
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            // Output format: "notAfter=Mon DD HH:MM:SS YYYY GMT"
+            parse_openssl_enddate(&stdout, cert_path)
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            CertificateExpiry {
+                path: cert_path.to_string(),
+                expiry_date: None,
+                days_remaining: None,
+                status: CertExpiryStatus::Unknown,
+                error: Some(format!("openssl error: {}", stderr.trim())),
+            }
+        }
+        Err(e) => {
+            CertificateExpiry {
+                path: cert_path.to_string(),
+                expiry_date: None,
+                days_remaining: None,
+                status: CertExpiryStatus::Unknown,
+                error: Some(format!("Failed to run openssl: {}", e)),
+            }
+        }
+    }
+}
+
+#[cfg(not(unix))]
+pub fn check_certificate_expiry(cert_path: &str) -> CertificateExpiry {
+    CertificateExpiry {
+        path: cert_path.to_string(),
+        expiry_date: None,
+        days_remaining: None,
+        status: CertExpiryStatus::Unknown,
+        error: Some("Certificate expiry check only supported on Unix".to_string()),
+    }
+}
+
+/// Parse openssl x509 -enddate output
+fn parse_openssl_enddate(output: &str, cert_path: &str) -> CertificateExpiry {
+    // Format: "notAfter=Mar 15 12:00:00 2025 GMT"
+    let date_str = output
+        .trim()
+        .strip_prefix("notAfter=")
+        .unwrap_or(output.trim());
+
+    // Parse the date - openssl uses format like "Mar 15 12:00:00 2025 GMT"
+    match parse_openssl_date(date_str) {
+        Some(expiry_date) => {
+            let now = Utc::now();
+            let duration = expiry_date.signed_duration_since(now);
+            let days = duration.num_days();
+
+            let status = if days < 0 {
+                CertExpiryStatus::Expired
+            } else if days < 7 {
+                CertExpiryStatus::Urgent
+            } else if days < 14 {
+                CertExpiryStatus::Critical
+            } else if days < 30 {
+                CertExpiryStatus::Warning
+            } else {
+                CertExpiryStatus::Ok
+            };
+
+            CertificateExpiry {
+                path: cert_path.to_string(),
+                expiry_date: Some(expiry_date),
+                days_remaining: Some(days),
+                status,
+                error: None,
+            }
+        }
+        None => CertificateExpiry {
+            path: cert_path.to_string(),
+            expiry_date: None,
+            days_remaining: None,
+            status: CertExpiryStatus::Unknown,
+            error: Some(format!("Failed to parse date: {}", date_str)),
+        },
+    }
+}
+
+/// Parse openssl date format (e.g., "Mar 15 12:00:00 2025 GMT")
+fn parse_openssl_date(date_str: &str) -> Option<DateTime<Utc>> {
+    // Try multiple formats that openssl might output
+    let formats = [
+        "%b %d %H:%M:%S %Y GMT",     // Mar 15 12:00:00 2025 GMT
+        "%b  %d %H:%M:%S %Y GMT",    // Mar  5 12:00:00 2025 GMT (single digit day)
+        "%B %d %H:%M:%S %Y GMT",     // March 15 12:00:00 2025 GMT
+    ];
+
+    let trimmed = date_str.trim();
+
+    for format in formats {
+        if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(trimmed, format) {
+            return Some(DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc));
+        }
+    }
+
+    None
+}
+
+/// Log certificate expiry warnings based on status
+pub fn log_certificate_expiry(expiry: &CertificateExpiry) {
+    match expiry.status {
+        CertExpiryStatus::Ok => {
+            if let Some(days) = expiry.days_remaining {
+                info!(
+                    path = %expiry.path,
+                    days_remaining = days,
+                    "TLS certificate valid"
+                );
+            }
+        }
+        CertExpiryStatus::Warning => {
+            if let Some(days) = expiry.days_remaining {
+                warn!(
+                    path = %expiry.path,
+                    days_remaining = days,
+                    "TLS certificate expiring soon - renew within 30 days"
+                );
+            }
+        }
+        CertExpiryStatus::Critical => {
+            if let Some(days) = expiry.days_remaining {
+                error!(
+                    path = %expiry.path,
+                    days_remaining = days,
+                    "TLS certificate expiring - renew immediately"
+                );
+            }
+        }
+        CertExpiryStatus::Urgent => {
+            if let Some(days) = expiry.days_remaining {
+                error!(
+                    path = %expiry.path,
+                    days_remaining = days,
+                    "TLS certificate expires in less than 7 days!"
+                );
+            }
+        }
+        CertExpiryStatus::Expired => {
+            error!(
+                path = %expiry.path,
+                "TLS certificate has EXPIRED!"
+            );
+        }
+        CertExpiryStatus::Unknown => {
+            if let Some(ref err) = expiry.error {
+                warn!(
+                    path = %expiry.path,
+                    error = %err,
+                    "Could not check TLS certificate expiry"
+                );
+            }
+        }
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Datelike;
 
     #[test]
     fn test_mask_secret_long() {
@@ -287,5 +527,41 @@ mod tests {
             // /etc/passwd is typically world-readable (0644), should fail
             assert!(validate_key_file_permissions(path).is_err());
         }
+    }
+
+    #[test]
+    fn test_cert_expiry_status_display() {
+        assert_eq!(format!("{}", CertExpiryStatus::Ok), "OK");
+        assert_eq!(format!("{}", CertExpiryStatus::Warning), "WARNING");
+        assert_eq!(format!("{}", CertExpiryStatus::Critical), "CRITICAL");
+        assert_eq!(format!("{}", CertExpiryStatus::Urgent), "URGENT");
+        assert_eq!(format!("{}", CertExpiryStatus::Expired), "EXPIRED");
+        assert_eq!(format!("{}", CertExpiryStatus::Unknown), "UNKNOWN");
+    }
+
+    #[test]
+    fn test_parse_openssl_date() {
+        // Standard format
+        let date = parse_openssl_date("Mar 15 12:00:00 2025 GMT");
+        assert!(date.is_some());
+        let d = date.unwrap();
+        assert_eq!(d.month(), 3);
+        assert_eq!(d.day(), 15);
+        assert_eq!(d.year(), 2025);
+
+        // Single digit day with double space
+        let date2 = parse_openssl_date("Jan  5 08:30:00 2026 GMT");
+        assert!(date2.is_some());
+
+        // Invalid format
+        let invalid = parse_openssl_date("invalid date");
+        assert!(invalid.is_none());
+    }
+
+    #[test]
+    fn test_cert_expiry_file_not_found() {
+        let result = check_certificate_expiry("/nonexistent/cert.pem");
+        assert_eq!(result.status, CertExpiryStatus::Unknown);
+        assert!(result.error.is_some());
     }
 }

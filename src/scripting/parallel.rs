@@ -414,6 +414,8 @@ mod tests {
             address: None,
             delay_ms: None,
             script_id: None,
+            url: None,
+            method: None,
             condition: None,
             scope: None,
         }
