@@ -51,8 +51,21 @@ fn generate_default_config() -> Result<()> {
     use std::fs;
     use std::path::Path;
 
-    let config_path =
-        std::env::var("SUDERRA_CONFIG").unwrap_or_else(|_| "/etc/suderra/config.yaml".to_string());
+    // v1.2.3: Log when using default config path
+    let config_path = match std::env::var("SUDERRA_CONFIG") {
+        Ok(path) => {
+            eprintln!("Using config path from SUDERRA_CONFIG: {}", path);
+            path
+        }
+        Err(_) => {
+            let default_path = "/etc/suderra/config.yaml".to_string();
+            eprintln!(
+                "SUDERRA_CONFIG not set, using default: {}",
+                default_path
+            );
+            default_path
+        }
+    };
 
     // Check if config already exists
     if Path::new(&config_path).exists() {
@@ -503,16 +516,23 @@ fn notify_systemd_ready() -> Result<()> {
             interval_usec / 1000
         );
 
-        // Spawn watchdog heartbeat task
+        // Spawn watchdog heartbeat task (v1.2.3: Added error logging for task failures)
         tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(interval).await;
-                if let Err(e) = sd_notify::notify(false, &[NotifyState::Watchdog]) {
-                    warn!("Failed to send watchdog heartbeat: {}", e);
-                } else {
-                    debug!("Watchdog heartbeat sent");
+            let result = async {
+                loop {
+                    tokio::time::sleep(interval).await;
+                    if let Err(e) = sd_notify::notify(false, &[NotifyState::Watchdog]) {
+                        warn!("Failed to send watchdog heartbeat: {}", e);
+                    } else {
+                        debug!("Watchdog heartbeat sent");
+                    }
                 }
             }
+            .await;
+
+            // This point is only reached if the loop somehow exits (shouldn't happen)
+            error!("Watchdog heartbeat task unexpectedly terminated");
+            result
         });
     }
 
@@ -541,6 +561,7 @@ fn setup_shutdown_handler() -> Result<tokio::sync::watch::Receiver<bool>> {
     })?;
 
     // Setup Unix-specific signal handlers (SIGTERM, SIGHUP)
+    // v1.2.3: Enhanced error handling for signal handler task
     #[cfg(unix)]
     {
         let tx_term = tx.clone();
@@ -553,7 +574,7 @@ fn setup_shutdown_handler() -> Result<tokio::sync::watch::Receiver<bool>> {
             let mut sigterm = match signal(SignalKind::terminate()) {
                 Ok(s) => s,
                 Err(e) => {
-                    warn!("Failed to setup SIGTERM handler: {}", e);
+                    error!("Failed to setup SIGTERM handler: {}. SIGTERM will not trigger graceful shutdown.", e);
                     return;
                 }
             };
@@ -561,19 +582,25 @@ fn setup_shutdown_handler() -> Result<tokio::sync::watch::Receiver<bool>> {
             let mut sighup = match signal(SignalKind::hangup()) {
                 Ok(s) => s,
                 Err(e) => {
-                    warn!("Failed to setup SIGHUP handler: {}", e);
+                    error!("Failed to setup SIGHUP handler: {}. SIGHUP will not trigger graceful shutdown.", e);
                     return;
                 }
             };
 
+            debug!("Unix signal handler task started successfully");
+
             tokio::select! {
                 _ = sigterm.recv() => {
                     info!("SIGTERM received, initiating graceful shutdown...");
-                    let _ = tx_term.send(true);
+                    if tx_term.send(true).is_err() {
+                        error!("Failed to send shutdown signal via SIGTERM handler");
+                    }
                 }
                 _ = sighup.recv() => {
                     info!("SIGHUP received, initiating graceful shutdown...");
-                    let _ = tx_hup.send(true);
+                    if tx_hup.send(true).is_err() {
+                        error!("Failed to send shutdown signal via SIGHUP handler");
+                    }
                 }
             }
         });
@@ -685,9 +712,19 @@ async fn run_agent(
     shutdown_coordinator.register_task("command", command_handle);
 
     // Step 8: Initialize SQLite persistence for RETAIN variables (IEC 61131-3)
+    // v1.2.3: Log when using default data directory
     let persistence = {
-        let data_dir =
-            std::env::var("SUDERRA_DATA_DIR").unwrap_or_else(|_| "/var/lib/suderra".to_string());
+        let data_dir = match std::env::var("SUDERRA_DATA_DIR") {
+            Ok(dir) => {
+                info!("Using data directory from SUDERRA_DATA_DIR: {}", dir);
+                dir
+            }
+            Err(_) => {
+                let default_dir = "/var/lib/suderra".to_string();
+                debug!("SUDERRA_DATA_DIR not set, using default: {}", default_dir);
+                default_dir
+            }
+        };
         let db_path = format!("{}/retain.db", data_dir);
 
         match SqlitePersistence::new(&db_path) {

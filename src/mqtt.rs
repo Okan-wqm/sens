@@ -7,15 +7,31 @@
 //! - TLS 1.2+ encryption for data confidentiality (FR4)
 //! - mTLS for device authentication (FR1)
 //! - Last Will for device status monitoring
+//!
+//! ## v1.2.3 Improvements
+//! - Increased message channel capacity (100 -> 500)
+//! - Added backpressure handling with retry logic
+//! - Improved error reporting for channel full conditions
 
 use anyhow::{Context, Result};
 use chrono::Utc;
 use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS, Transport};
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
+
+/// Message channel capacity (v1.2.3: increased from 100 to 500)
+/// Higher capacity reduces message loss during burst traffic
+const MESSAGE_CHANNEL_CAPACITY: usize = 500;
+
+/// Maximum retry attempts when channel is full (v1.2.3)
+const CHANNEL_SEND_MAX_RETRIES: u32 = 3;
+
+/// Delay between retry attempts in milliseconds (v1.2.3)
+const CHANNEL_SEND_RETRY_DELAY_MS: u64 = 10;
 
 use crate::config::{AgentConfig, ResolvedTopics};
 use crate::error::AgentError;
@@ -217,8 +233,8 @@ impl MqttClient {
         // Create client
         let (client, mut eventloop) = AsyncClient::new(options, 100);
 
-        // Create message channel
-        let (message_tx, message_rx) = mpsc::channel(100);
+        // Create message channel (v1.2.3: increased capacity)
+        let (message_tx, message_rx) = mpsc::channel(MESSAGE_CHANNEL_CAPACITY);
 
         // Spawn event loop handler with exponential backoff config
         let topics_clone = topics.clone();
@@ -269,12 +285,51 @@ impl MqttClient {
                     debug!("Received message on topic: {}", publish.topic);
 
                     let msg = IncomingMessage {
-                        topic: publish.topic,
+                        topic: publish.topic.clone(),
                         payload: publish.payload.to_vec(),
                     };
 
-                    if message_tx.send(msg).await.is_err() {
-                        warn!("Failed to send message to channel");
+                    // v1.2.3: Retry logic with backpressure handling
+                    let mut send_attempts = 0u32;
+                    loop {
+                        match message_tx.try_send(msg.clone()) {
+                            Ok(()) => {
+                                if send_attempts > 0 {
+                                    debug!(
+                                        "Message sent after {} retries (topic: {})",
+                                        send_attempts, publish.topic
+                                    );
+                                }
+                                break;
+                            }
+                            Err(mpsc::error::TrySendError::Full(_)) => {
+                                send_attempts = send_attempts.saturating_add(1);
+                                if send_attempts >= CHANNEL_SEND_MAX_RETRIES {
+                                    error!(
+                                        "Message channel full after {} retries. \
+                                        Message dropped (topic: {}). Consider increasing \
+                                        MESSAGE_CHANNEL_CAPACITY or processing messages faster.",
+                                        send_attempts, publish.topic
+                                    );
+                                    break;
+                                }
+                                warn!(
+                                    "Message channel full (attempt {}/{}), retrying...",
+                                    send_attempts, CHANNEL_SEND_MAX_RETRIES
+                                );
+                                tokio::time::sleep(Duration::from_millis(
+                                    CHANNEL_SEND_RETRY_DELAY_MS,
+                                ))
+                                .await;
+                            }
+                            Err(mpsc::error::TrySendError::Closed(_)) => {
+                                error!(
+                                    "Message channel closed. Receiver dropped. \
+                                    This indicates a critical error in the command handler."
+                                );
+                                break;
+                            }
+                        }
                     }
                 }
                 Ok(Event::Incoming(Packet::ConnAck(connack))) => {

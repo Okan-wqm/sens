@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::{debug, info, warn};
 
-use super::function_blocks::{FunctionBlock, CTD, CTU, CTUD, F_TRIG, R_TRIG, TOF, TON, TP};
+use super::function_blocks::{FunctionBlock, CTD, CTU, CTUD, F_TRIG, R_TRIG, RS, SR, TOF, TON, TP};
 use super::persistence::{FBState, FunctionBlockStore, SqlitePersistence};
 
 // ============================================================================
@@ -141,6 +141,9 @@ impl FBRegistry {
             }
             "R_TRIG" => Box::new(R_TRIG::new()),
             "F_TRIG" => Box::new(F_TRIG::new()),
+            // Flip-Flops (v1.2.3)
+            "RS" => Box::new(RS::new()),
+            "SR" => Box::new(SR::new()),
             _ => {
                 return Err(FBRegistryError::UnknownType(def.fb_type.clone()));
             }
@@ -411,7 +414,8 @@ mod tests {
     fn test_create_all_types() {
         let mut registry = FBRegistry::new();
 
-        let types = ["TON", "TOF", "TP", "CTU", "CTD", "CTUD", "R_TRIG", "F_TRIG"];
+        // v1.2.3: Added RS and SR flip-flops
+        let types = ["TON", "TOF", "TP", "CTU", "CTD", "CTUD", "R_TRIG", "F_TRIG", "RS", "SR"];
 
         for (i, fb_type) in types.iter().enumerate() {
             let def = FBDefinition {
@@ -425,7 +429,58 @@ mod tests {
             registry.create_fb(def).unwrap();
         }
 
-        assert_eq!(registry.count(), 8);
+        assert_eq!(registry.count(), 10);
+    }
+
+    #[test]
+    fn test_rs_flipflop() {
+        let mut registry = FBRegistry::new();
+
+        registry
+            .create_fb(FBDefinition {
+                id: "latch".to_string(),
+                fb_type: "RS".to_string(),
+                params: FBParams::default(),
+                inputs: HashMap::new(),
+                outputs: HashMap::new(),
+            })
+            .unwrap();
+
+        // Set the latch
+        registry.set_input("latch", "S", Value::Bool(true));
+        registry.execute_all();
+        assert_eq!(registry.get_output("latch", "Q1"), Some(Value::Bool(true)));
+
+        // Release S - should stay latched
+        registry.set_input("latch", "S", Value::Bool(false));
+        registry.execute_all();
+        assert_eq!(registry.get_output("latch", "Q1"), Some(Value::Bool(true)));
+
+        // Reset
+        registry.set_input("latch", "R1", Value::Bool(true));
+        registry.execute_all();
+        assert_eq!(registry.get_output("latch", "Q1"), Some(Value::Bool(false)));
+    }
+
+    #[test]
+    fn test_sr_flipflop() {
+        let mut registry = FBRegistry::new();
+
+        registry
+            .create_fb(FBDefinition {
+                id: "latch".to_string(),
+                fb_type: "SR".to_string(),
+                params: FBParams::default(),
+                inputs: HashMap::new(),
+                outputs: HashMap::new(),
+            })
+            .unwrap();
+
+        // Both S and R TRUE - Set should dominate (SR is set-dominant)
+        registry.set_input("latch", "S1", Value::Bool(true));
+        registry.set_input("latch", "R", Value::Bool(true));
+        registry.execute_all();
+        assert_eq!(registry.get_output("latch", "Q1"), Some(Value::Bool(true)));
     }
 
     #[test]

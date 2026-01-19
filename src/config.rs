@@ -310,8 +310,10 @@ impl Default for MqttTopics {
 
 impl MqttTopics {
     /// Resolve topic pattern with actual tenant_id and device_id
+    ///
+    /// v1.2.3: Added validation for unresolved placeholders
     pub fn resolve(&self, tenant_id: &str, device_id: &str) -> ResolvedTopics {
-        ResolvedTopics {
+        let resolved = ResolvedTopics {
             status: self
                 .status
                 .replace("{tenant_id}", tenant_id)
@@ -332,7 +334,12 @@ impl MqttTopics {
                 .config
                 .replace("{tenant_id}", tenant_id)
                 .replace("{device_id}", device_id),
-        }
+        };
+
+        // v1.2.3: Validate that all placeholders were resolved
+        resolved.validate_no_placeholders();
+
+        resolved
     }
 }
 
@@ -344,6 +351,37 @@ pub struct ResolvedTopics {
     pub responses: String,
     pub commands: String,
     pub config: String,
+}
+
+impl ResolvedTopics {
+    /// Check if a topic contains unresolved placeholders (v1.2.3)
+    fn contains_placeholder(topic: &str) -> bool {
+        topic.contains("{") && topic.contains("}")
+    }
+
+    /// Validate that no placeholders remain after resolution (v1.2.3)
+    ///
+    /// Logs warnings for any unresolved placeholders which may cause
+    /// MQTT connection issues.
+    fn validate_no_placeholders(&self) {
+        let topics = [
+            ("status", &self.status),
+            ("telemetry", &self.telemetry),
+            ("responses", &self.responses),
+            ("commands", &self.commands),
+            ("config", &self.config),
+        ];
+
+        for (name, topic) in topics {
+            if Self::contains_placeholder(topic) {
+                warn!(
+                    "MQTT {} topic contains unresolved placeholder: '{}'. \
+                    This may cause connection issues. Check your topic configuration.",
+                    name, topic
+                );
+            }
+        }
+    }
 }
 
 /// OpenTelemetry OTLP configuration (optional, requires "telemetry" feature)

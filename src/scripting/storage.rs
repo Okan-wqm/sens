@@ -131,6 +131,14 @@ impl Script {
             // Store current as previous for potential re-rollback
             self.previous_definition = Some(Box::new(self.definition.clone()));
             self.definition = *prev;
+            // v1.2.3: Warn if revision is about to wrap around
+            if self.revision == u32::MAX {
+                warn!(
+                    "Script '{}' revision counter wrapping from {} to 0. \
+                    Version history tracking may be affected.",
+                    self.definition.id, self.revision
+                );
+            }
             self.revision = self.revision.wrapping_add(1);
             self.updated_at = Utc::now();
             true
@@ -333,6 +341,14 @@ impl ScriptStorage {
         let script = if let Some(mut old_script) = existing {
             // Update existing script - store previous version (v1.2.1)
             old_script.previous_definition = Some(Box::new(old_script.definition.clone()));
+            // v1.2.3: Warn if revision is about to wrap around
+            if old_script.revision == u32::MAX {
+                warn!(
+                    "Script '{}' revision counter wrapping from {} to 0. \
+                    Version history tracking may be affected.",
+                    definition.id, old_script.revision
+                );
+            }
             old_script.definition = definition;
             old_script.revision = old_script.revision.wrapping_add(1);
             old_script.updated_at = Utc::now();

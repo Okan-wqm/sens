@@ -12,13 +12,36 @@
 //! # IEC 62443 SL2 Compliance
 //! - FR5: Resource availability (bounded queue prevents DoS)
 //! - FR6: Monitoring (queue metrics for observability)
+//!
+//! # v1.2.3 Improvements
+//! - Added mutex poison recovery for better resilience
 
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use std::sync::Mutex;
-use tracing::{debug, info, warn};
+use std::sync::{Mutex, MutexGuard, PoisonError};
+use tracing::{debug, error, info, warn};
+
+/// Acquire mutex lock with poison recovery (v1.2.3)
+///
+/// If the mutex is poisoned (previous holder panicked), this function
+/// will recover the lock and log a warning. The data may be in an
+/// inconsistent state, but for SQLite connections this is generally safe
+/// as SQLite handles its own transaction rollback.
+fn acquire_lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>> {
+    match mutex.lock() {
+        Ok(guard) => Ok(guard),
+        Err(poisoned) => {
+            error!(
+                "Mutex was poisoned by a panicked thread. Recovering lock. \
+                Data may be inconsistent - consider restarting the agent."
+            );
+            // Recover the lock - SQLite will have rolled back any incomplete transaction
+            Ok(poisoned.into_inner())
+        }
+    }
+}
 
 /// Message priority levels (higher value = higher priority)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -214,7 +237,7 @@ impl OfflineQueue {
 
     /// Initialize database schema
     fn init_schema(&self) -> Result<()> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let conn = acquire_lock(&self.conn)?;
 
         conn.execute_batch(
             "
@@ -261,7 +284,7 @@ impl OfflineQueue {
         qos: u8,
         retain: bool,
     ) -> Result<i64> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let conn = acquire_lock(&self.conn)?;
 
         // Check current queue size
         let current_size: usize = conn
@@ -328,7 +351,7 @@ impl OfflineQueue {
     /// Returns the message but does NOT remove it from queue.
     /// Call `ack()` after successful processing to remove.
     pub fn peek(&self) -> Result<Option<QueuedMessage>> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let conn = acquire_lock(&self.conn)?;
 
         // Clean up expired messages first
         if self.max_age_secs > 0 {
@@ -364,7 +387,7 @@ impl OfflineQueue {
 
     /// Acknowledge successful message processing (removes from queue)
     pub fn ack(&self, message_id: i64) -> Result<bool> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let conn = acquire_lock(&self.conn)?;
 
         let deleted = conn
             .execute(
@@ -382,7 +405,7 @@ impl OfflineQueue {
 
     /// Mark message for retry (increments retry count)
     pub fn nack(&self, message_id: i64) -> Result<()> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let conn = acquire_lock(&self.conn)?;
 
         conn.execute(
             "UPDATE message_queue SET retry_count = retry_count + 1 WHERE id = ?1",
@@ -396,7 +419,7 @@ impl OfflineQueue {
 
     /// Get multiple messages for batch processing
     pub fn peek_batch(&self, max_count: usize) -> Result<Vec<QueuedMessage>> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let conn = acquire_lock(&self.conn)?;
 
         // Clean up expired messages first
         if self.max_age_secs > 0 {
@@ -435,7 +458,7 @@ impl OfflineQueue {
             return Ok(0);
         }
 
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let conn = acquire_lock(&self.conn)?;
 
         // Build parameterized query
         let placeholders: Vec<String> =
@@ -482,7 +505,7 @@ impl OfflineQueue {
 
     /// Get queue statistics
     pub fn stats(&self) -> Result<QueueStats> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let conn = acquire_lock(&self.conn)?;
 
         let total_messages: usize = conn
             .query_row("SELECT COUNT(*) FROM message_queue", [], |row| row.get(0))
@@ -543,7 +566,7 @@ impl OfflineQueue {
 
     /// Clear all messages from queue
     pub fn clear(&self) -> Result<usize> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let conn = acquire_lock(&self.conn)?;
 
         let deleted = conn
             .execute("DELETE FROM message_queue", [])
@@ -588,7 +611,7 @@ impl OfflineQueue {
     /// * `Ok((before, after))` - Bytes before and after VACUUM
     /// * `Err` if VACUUM fails
     pub fn vacuum(&self) -> Result<(u64, u64)> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let conn = acquire_lock(&self.conn)?;
 
         let before = self.get_db_size(&conn);
 
@@ -621,7 +644,7 @@ impl OfflineQueue {
     /// * `Some((before, after))` if VACUUM was run
     /// * `None` if VACUUM was skipped
     pub fn vacuum_if_needed(&self) -> Result<Option<(u64, u64)>> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("{}", e))?;
+        let conn = acquire_lock(&self.conn)?;
 
         // Skip if no disk limit set
         if self.max_disk_bytes == 0 {

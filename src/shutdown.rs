@@ -7,11 +7,17 @@
 //! 4. Disconnect hardware interfaces
 //! 5. Publish offline status
 //! 6. Disconnect MQTT
+//!
+//! v1.2.3: Increased broadcast channel capacity for reliability
 
 use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
-use tracing::{info, warn};
+use tracing::{debug, error, info, warn};
+
+/// Broadcast channel capacity for shutdown signals (v1.2.3)
+/// Increased from 1 to 16 to prevent message loss when multiple subscribers exist
+const SHUTDOWN_CHANNEL_CAPACITY: usize = 16;
 
 /// Graceful shutdown coordinator
 pub struct ShutdownCoordinator {
@@ -23,8 +29,10 @@ pub struct ShutdownCoordinator {
 
 impl ShutdownCoordinator {
     /// Create a new shutdown coordinator
+    ///
+    /// v1.2.3: Uses larger broadcast channel capacity for reliability
     pub fn new() -> Self {
-        let (notify, _) = broadcast::channel(1);
+        let (notify, _) = broadcast::channel(SHUTDOWN_CHANNEL_CAPACITY);
         Self {
             notify,
             tasks: Vec::new(),

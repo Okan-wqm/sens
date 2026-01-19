@@ -4,6 +4,7 @@
 //! - Timers: TON (On-Delay), TOF (Off-Delay), TP (Pulse)
 //! - Counters: CTU (Up), CTD (Down), CTUD (Up/Down)
 //! - Edge Detection: R_TRIG (Rising), F_TRIG (Falling)
+//! - Flip-Flops: RS (Reset-dominant), SR (Set-dominant) [v1.2.3]
 //!
 //! All function blocks:
 //! - Maintain internal state between scan cycles
@@ -12,10 +13,12 @@
 
 pub mod counters;
 pub mod edge_triggers;
+pub mod flipflops;
 pub mod timers;
 
 pub use counters::{CTD, CTU, CTUD};
 pub use edge_triggers::{F_TRIG, R_TRIG};
+pub use flipflops::{RS, SR};
 pub use timers::{TOF, TON, TP};
 
 use serde::{Deserialize, Serialize};

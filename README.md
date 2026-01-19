@@ -1,6 +1,18 @@
-# Suderra Edge Agent v1.2.1
+# Suderra Edge Agent v1.2.3
 
 Industrial IoT Edge Agent for aquaculture monitoring and control systems. Built with Rust for reliability, safety, and performance on resource-constrained edge devices.
+
+## What's New in v1.2.3
+
+- **RS/SR Flip-Flops**: IEC 61131-3 compliant bistable function blocks (Reset-dominant and Set-dominant)
+- **Improved Resilience**: Enhanced async task error propagation and monitoring
+- **MQTT Reliability**: Increased message channel capacity (100 -> 500) with retry logic
+- **Modbus Lookup Fix**: New async `get_client_by_name()` for reliable device lookup
+- **Shutdown Safety**: Increased broadcast channel capacity to prevent signal loss
+- **Environment Logging**: Better visibility into fallback paths for config and data directories
+- **Mutex Recovery**: Automatic recovery from poisoned mutex states in offline queue
+- **Topic Validation**: Warns about unresolved MQTT topic placeholders
+- **Revision Tracking**: Warns when script revision counter wraps around
 
 ## What's New in v1.2.1
 

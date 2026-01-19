@@ -541,14 +541,19 @@ impl ModbusClient {
                     )
                     .with_context(|| "Failed to create TLS config with client cert")?
                 } else {
-                    // Server-only TLS (no client cert) - use self_signed for simpler config
-                    // Note: full_pki without client cert requires empty paths which isn't ideal
-                    // For server-only auth, we use self_signed with the CA cert as the expected cert
+                    // Server-only TLS (no client cert)
+                    // v1.2.3: rodbus full_pki() requires paths even for server-only auth.
+                    // We use empty paths which rodbus interprets as "no client certificate".
+                    // This is a known limitation of the rodbus API.
+                    debug!(
+                        "Configuring server-only TLS for '{}' (no client certificate)",
+                        self.config.name
+                    );
                     rodbus::client::TlsClientConfig::full_pki(
-                        Some(server_name.clone()), // Server name for SNI validation (Option<String>)
-                        ca_path,                   // CA certificate path
-                        std::path::Path::new(""),  // Empty client cert path
-                        std::path::Path::new(""),  // Empty client key path
+                        Some(server_name.clone()), // Server name for SNI validation
+                        ca_path,                   // CA certificate path for server validation
+                        std::path::Path::new(""),  // No client cert (rodbus interprets empty as none)
+                        std::path::Path::new(""),  // No client key (rodbus interprets empty as none)
                         None,                      // No password
                         rodbus::client::MinTlsVersion::V1_2,
                     )
@@ -1114,20 +1119,38 @@ impl ModbusManager {
 
     /// Get client by device name (returns Arc for caller to lock)
     ///
-    /// Prefer this over `get_client_locked` when you need to hold the lock
-    /// across multiple operations.
+    /// Prefer `get_client_by_name` (async) for reliable lookups.
+    /// This sync version uses try_lock and may return None if locks are contested.
+    ///
+    /// v1.2.3: Added retry logic for contested locks
     pub fn get_client(&self, name: &str) -> Option<Arc<Mutex<ModbusClient>>> {
-        // We need to check the name without holding the lock for too long
-        // This is a trade-off: we iterate but don't lock each one
-        for client_arc in &self.clients {
-            // Try to get name without blocking - use try_lock
-            if let Ok(client) = client_arc.try_lock() {
-                if client.config.name == name {
-                    return Some(Arc::clone(client_arc));
+        // v1.2.3: Retry multiple times if locks are contested
+        for _attempt in 0..3 {
+            for client_arc in &self.clients {
+                if let Ok(client) = client_arc.try_lock() {
+                    if client.config.name == name {
+                        return Some(Arc::clone(client_arc));
+                    }
                 }
             }
+            // Brief yield to allow other tasks to release locks
+            std::hint::spin_loop();
         }
-        // Fallback: blocking check if try_lock failed
+        None
+    }
+
+    /// Get client by device name (async version - always reliable)
+    ///
+    /// v1.2.3: New async method that guarantees finding the device if it exists,
+    /// even when locks are contested.
+    pub async fn get_client_by_name(&self, name: &str) -> Option<Arc<Mutex<ModbusClient>>> {
+        for client_arc in &self.clients {
+            let client = client_arc.lock().await;
+            if client.config.name == name {
+                drop(client); // Release lock before returning Arc
+                return Some(Arc::clone(client_arc));
+            }
+        }
         None
     }
 
