@@ -21,8 +21,11 @@
 11. [HTTP Health API](#11-http-health-api)
 12. [Security](#12-security)
 13. [Configuration](#13-configuration)
-14. [Provisioning](#14-provisioning)
-15. [Limits & Defaults](#15-limits--defaults)
+14. [Environment Variables](#14-environment-variables)
+15. [Feature Flags](#15-feature-flags)
+16. [Error Types](#16-error-types)
+17. [Provisioning](#17-provisioning)
+18. [Limits & Defaults](#18-limits--defaults)
 
 ---
 
@@ -1331,6 +1334,8 @@ Behavior:
 
 Alarm management following IEC 62682 standard for industrial automation.
 
+> **Note**: Alarm management is an **internal API** only. Alarm functions are not exposed as remote MQTT commands. They are used internally by the scripting engine and can be accessed programmatically.
+
 ### 7.1 Alarm Priority Levels
 
 | Priority | Value | Description |
@@ -1425,6 +1430,8 @@ Alarm history is maintained with maximum 1000 entries.
 ## 8. Backup & Restore
 
 Backup and restore functionality for disaster recovery (IEC 62443 SL2 FR7 compliance).
+
+> **Note**: Backup/Restore is an **internal API** only. These functions are not exposed as remote MQTT commands. Backups are triggered internally (e.g., on deploy) or via local system access.
 
 ### 8.1 Backup Contents
 
@@ -1989,9 +1996,147 @@ runtime:
 
 ---
 
-## 14. Provisioning
+## 14. Environment Variables
 
-### 14.1 Activation Flow
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SUDERRA_CONFIG` | - | Path to configuration file |
+| `SUDERRA_DATA_DIR` | `/var/lib/suderra` | Directory for program state, backups, scripts |
+| `SUDERRA_LOG_LEVEL` | `info` | Log level (trace, debug, info, warn, error) |
+| `RUST_LOG` | - | Alternative log level (tracing crate) |
+
+### 14.1 Data Directory Structure
+
+```
+/var/lib/suderra/
+├── state.json           # Program state persistence
+├── backups/             # Backup files (.sdb)
+├── scripts/             # Persisted scripts
+├── variables/           # Persisted variables
+└── offline_queue.db     # SQLite offline queue
+```
+
+---
+
+## 15. Feature Flags
+
+Cargo features that enable optional functionality:
+
+| Feature | Description | Default |
+|---------|-------------|---------|
+| `gpio` | GPIO support (Linux only, requires rppal) | disabled |
+| `health` | HTTP health check endpoint (/health, /ready, /metrics) | disabled |
+| `telemetry` | OpenTelemetry OTLP tracing export | disabled |
+| `metrics` | Prometheus metrics export at /metrics | disabled |
+| `strict-security` | Additional security checks for production | disabled |
+
+### 15.1 Build Examples
+
+```bash
+# Basic build
+cargo build --release
+
+# With GPIO and health endpoint
+cargo build --release --features "gpio,health"
+
+# Full featured build
+cargo build --release --features "gpio,health,telemetry,metrics"
+
+# Production with strict security
+cargo build --release --features "gpio,health,strict-security"
+```
+
+### 15.2 Feature Dependencies
+
+- `metrics` requires `health` feature
+- `gpio` only works on Linux with rppal-compatible hardware
+- `strict-security` enables additional runtime checks
+
+---
+
+## 16. Error Types
+
+### 16.1 ModbusError
+
+Granular Modbus error types (v1.2.0):
+
+| Error | Description | Recoverable |
+|-------|-------------|-------------|
+| `Connection` | Connection failed | Yes |
+| `ConnectionTimeout` | Connection timeout (ms) | Yes |
+| `OperationTimeout` | Operation timeout (ms) | Yes |
+| `InvalidSlaveId` | Invalid Modbus slave ID (1-247) | No |
+| `FunctionCodeNotAllowed` | Security violation (IEC 62443 FR3) | No |
+| `RegisterOutOfRange` | Register address out of range | No |
+| `RegisterCountExceeded` | Register count exceeds limit | No |
+| `ChecksumError` | CRC/LRC validation failed | Yes |
+| `ModbusException` | Modbus exception response | Depends |
+| `RateLimited` | Rate limit exceeded (IEC 62443 FR5) | Yes |
+| `CircuitBreakerOpen` | Circuit breaker is open | Yes |
+| `WriteNotAllowed` | Write operations not allowed | No |
+| `NotConnected` | Device not connected | Yes |
+| `DeviceNotFound` | Modbus device not found | No |
+| `SerialPort` | Serial port error (RTU) | Yes |
+| `Protocol` | Generic protocol error | Depends |
+
+### 16.2 AgentError
+
+Top-level agent errors:
+
+| Error | Description |
+|-------|-------------|
+| `Modbus` | Modbus operation error |
+| `Mqtt` | MQTT connection/publish error |
+| `Persistence` | Database/SQLite error |
+| `Http` | HTTP client error (provisioning) |
+| `Io` | I/O operation error |
+| `Config` | Configuration error |
+| `TokenExpired` | Provisioning token expired |
+| `TokenAlreadyUsed` | Provisioning token already used |
+| `DeviceDecommissioned` | Device has been decommissioned |
+| `Timeout` | Operation timeout |
+| `RateLimited` | Rate limit exceeded |
+
+### 16.3 Script Errors
+
+| Error | Description |
+|-------|-------------|
+| `ExecutionDepthExceeded` | Max call depth exceeded |
+| `ExecutionTimeExceeded` | Max execution time exceeded |
+| `ActionLimitExceeded` | Max actions per cycle exceeded |
+| `InvalidCondition` | Invalid condition syntax |
+| `InvalidAction` | Invalid action configuration |
+| `VariableNotFound` | Referenced variable not found |
+| `FunctionBlockError` | Function block execution error |
+
+### 16.4 Error Response Format
+
+Command errors return structured responses:
+
+```json
+{
+  "command_id": "cmd_123",
+  "device_id": "device-uuid",
+  "success": false,
+  "error": {
+    "code": "MODBUS_TIMEOUT",
+    "message": "Operation timeout after 5000ms",
+    "recoverable": true,
+    "details": {
+      "device": "plc1",
+      "register": 100,
+      "timeout_ms": 5000
+    }
+  },
+  "timestamp": "2026-01-19T12:00:00Z"
+}
+```
+
+---
+
+## 17. Provisioning
+
+### 17.1 Activation Flow
 
 ```
 1. Agent starts with provisioning token
@@ -2003,7 +2148,7 @@ runtime:
 7. Publish online status
 ```
 
-### 14.2 Activation Request
+### 17.2 Activation Request
 
 ```json
 {
@@ -2019,7 +2164,7 @@ runtime:
 }
 ```
 
-### 14.3 Activation Response
+### 17.3 Activation Response
 
 ```json
 {
@@ -2035,7 +2180,7 @@ runtime:
 
 ---
 
-## 15. Limits & Defaults
+## 18. Limits & Defaults
 
 ### Core Limits
 
