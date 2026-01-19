@@ -38,6 +38,9 @@ use tracing::{debug, info, warn};
 /// Default OPC UA port
 pub const DEFAULT_OPCUA_PORT: u16 = 4840;
 
+/// Maximum OPC UA message size (16MB - matches build_hello max_message_size)
+const MAX_OPCUA_MESSAGE_SIZE: usize = 16 * 1024 * 1024;
+
 /// OPC UA message types
 const MSG_HELLO: &[u8] = b"HEL";
 const MSG_ACK: &[u8] = b"ACK";
@@ -416,6 +419,14 @@ impl OpcUaClient {
 
         // Get message size
         let size = u32::from_le_bytes([header[4], header[5], header[6], header[7]]) as usize;
+
+        // Validate message size
+        if size < 8 {
+            return Err(anyhow!("Invalid OPC UA message size: {} (minimum is 8)", size));
+        }
+        if size > MAX_OPCUA_MESSAGE_SIZE {
+            return Err(anyhow!("OPC UA message too large: {} bytes (max {})", size, MAX_OPCUA_MESSAGE_SIZE));
+        }
 
         // Read rest of message
         let mut response = header.to_vec();

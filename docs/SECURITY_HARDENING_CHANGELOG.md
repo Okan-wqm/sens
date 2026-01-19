@@ -1888,6 +1888,34 @@ if ams_length > MAX_AMS_PACKET_SIZE {
 
 ---
 
+### 18.5 OPC UA Message Size Validation
+**File**: `src/plc_programming/opcua.rs:418-426`
+**Severity**: CRITICAL (DoS/Panic)
+**Issue**: Two vulnerabilities in `send_receive`:
+1. If `size < 8`, `response.resize(size, 0)` then `response[8..]` causes panic
+2. No upper bound on message size
+
+```rust
+// Before (VULNERABLE - panic on size < 8, memory exhaustion on large size)
+let size = u32::from_le_bytes([header[4], header[5], header[6], header[7]]) as usize;
+let mut response = header.to_vec();
+response.resize(size, 0);
+conn.read_exact(&mut response[8..]).await?;
+
+// After (SAFE)
+let size = u32::from_le_bytes([header[4], header[5], header[6], header[7]]) as usize;
+if size < 8 {
+    return Err(anyhow!("Invalid OPC UA message size: {} (minimum is 8)", size));
+}
+if size > MAX_OPCUA_MESSAGE_SIZE {
+    return Err(anyhow!("OPC UA message too large: {} bytes (max {})", size, MAX_OPCUA_MESSAGE_SIZE));
+}
+```
+
+**Impact**: Prevents panic and memory exhaustion attacks via OPC UA
+
+---
+
 ## v1.3.1 Files Modified
 
 | File | Changes |
@@ -1895,6 +1923,7 @@ if ams_length > MAX_AMS_PACKET_SIZE {
 | `src/plc_programming/s7comm.rs` | TPKT underflow fix, max packet size validation |
 | `src/plc_programming/codesys.rs` | Payload length validation |
 | `src/plc_programming/ads.rs` | AMS packet size validation |
+| `src/plc_programming/opcua.rs` | Message size validation (min/max) |
 
 ---
 
@@ -1906,8 +1935,9 @@ if ams_length > MAX_AMS_PACKET_SIZE {
 | S7comm max packet size | HIGH | Fixed |
 | Codesys payload validation | HIGH | Fixed |
 | ADS packet size validation | HIGH | Fixed |
+| OPC UA size validation | CRITICAL | Fixed |
 
-**Total: 4 memory exhaustion vulnerabilities fixed in v1.3.1**
+**Total: 5 memory exhaustion/panic vulnerabilities fixed in v1.3.1**
 
 ---
 
