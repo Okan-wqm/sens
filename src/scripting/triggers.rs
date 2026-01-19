@@ -9,7 +9,7 @@
 use chrono::{Datelike, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tracing::{debug, warn};
+use tracing::{debug, error, warn};
 
 use super::{ComparisonOperator, ScriptContext};
 
@@ -108,8 +108,15 @@ impl TriggerManager {
 
         // Check debounce first (read-only)
         // v1.2.4: Use saturating_sub to handle clock adjustments (NTP, manual time change)
+        // v1.2.6: Use get() with early return instead of unwrap() to prevent panic
         {
-            let state = self.states.get(&state_key).unwrap();
+            let state = match self.states.get(&state_key) {
+                Some(s) => s,
+                None => {
+                    error!("Trigger state missing for '{}' - this should never happen", state_key);
+                    return false;
+                }
+            };
             if let Some(debounce) = trigger.debounce_ms {
                 // saturating_sub returns 0 if now_ms < last_triggered (clock went backwards)
                 // This effectively disables debounce for that cycle, which is safer than
@@ -121,27 +128,45 @@ impl TriggerManager {
         }
 
         // Evaluate trigger type
+        // v1.2.6: Use match with error handling instead of unwrap() to prevent panic
         let should_trigger = match trigger.trigger_type {
-            TriggerType::Threshold => Self::check_threshold_static(
-                trigger,
-                context,
-                self.states.get_mut(&state_key).unwrap(),
-            ),
-            TriggerType::Change => Self::check_change_static(
-                trigger,
-                context,
-                self.states.get_mut(&state_key).unwrap(),
-            ),
+            TriggerType::Threshold => {
+                match self.states.get_mut(&state_key) {
+                    Some(state) => Self::check_threshold_static(trigger, context, state),
+                    None => {
+                        error!("Trigger state missing for Threshold '{}'", state_key);
+                        false
+                    }
+                }
+            }
+            TriggerType::Change => {
+                match self.states.get_mut(&state_key) {
+                    Some(state) => Self::check_change_static(trigger, context, state),
+                    None => {
+                        error!("Trigger state missing for Change '{}'", state_key);
+                        false
+                    }
+                }
+            }
             TriggerType::Schedule => Self::check_schedule_static(trigger),
             TriggerType::Interval => {
-                let state = self.states.get(&state_key).unwrap();
-                Self::check_interval_static(trigger, state, now_ms)
+                match self.states.get(&state_key) {
+                    Some(state) => Self::check_interval_static(trigger, state, now_ms),
+                    None => {
+                        error!("Trigger state missing for Interval '{}'", state_key);
+                        false
+                    }
+                }
             }
-            TriggerType::GpioChange => Self::check_gpio_change_static(
-                trigger,
-                context,
-                self.states.get_mut(&state_key).unwrap(),
-            ),
+            TriggerType::GpioChange => {
+                match self.states.get_mut(&state_key) {
+                    Some(state) => Self::check_gpio_change_static(trigger, context, state),
+                    None => {
+                        error!("Trigger state missing for GpioChange '{}'", state_key);
+                        false
+                    }
+                }
+            }
             TriggerType::Manual => false,  // Only triggered via command
             TriggerType::Startup => false, // Handled separately on startup
         };

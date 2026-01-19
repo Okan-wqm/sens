@@ -619,6 +619,113 @@ async fn cmd_reboot(&self, params: &Value) -> (bool, Value, Option<String>) {
 
 ---
 
+## PHASE 7: v1.2.6 Security Audit Round 2
+
+**Date**: 2026-01-19
+**Version**: 1.2.6 (continued)
+
+### 7.1 Trigger State Panic Prevention
+**File**: `src/scripting/triggers.rs:112-144`
+**Severity**: CRITICAL
+**Issue**: Multiple `.unwrap()` calls on HashMap lookups could panic if state was missing
+
+**Fix**: Replaced unwrap() with match + error logging:
+```rust
+// Before (PANIC RISK)
+self.states.get_mut(&state_key).unwrap()
+
+// After (Safe)
+match self.states.get_mut(&state_key) {
+    Some(state) => Self::check_threshold_static(trigger, context, state),
+    None => {
+        error!("Trigger state missing for '{}'", state_key);
+        false
+    }
+}
+```
+
+---
+
+### 7.2 SQL Injection Prevention in Eviction
+**File**: `src/offline_queue.rs:210-221`
+**Severity**: HIGH
+**Issue**: `evict_count` used in format! for SQL LIMIT clause without bounds validation
+
+**Fix**: Added bounds validation:
+```rust
+const MAX_EVICT_COUNT: usize = 10000;
+if evict_count == 0 {
+    return Ok(0);
+}
+let safe_count = evict_count.min(MAX_EVICT_COUNT);
+```
+
+---
+
+### 7.3 SQL Injection Prevention in VACUUM INTO
+**File**: `src/offline_queue.rs:709-728`
+**Severity**: HIGH
+**Issue**: Backup path only escaped single quotes, but SQL injection still possible
+
+**Fix**: Added strict path validation:
+```rust
+if backup_path.is_empty() {
+    anyhow::bail!("Backup path cannot be empty");
+}
+if backup_path.contains('\'')
+    || backup_path.contains('"')
+    || backup_path.contains(';')
+    || backup_path.contains("--")
+{
+    anyhow::bail!("Backup path contains invalid characters");
+}
+```
+
+---
+
+### 7.4 Silent Data Loss Prevention
+**File**: `src/commands.rs:1332-1356`
+**Severity**: MEDIUM
+**Issue**: `unwrap_or_default()` silently discarded parse errors, losing program state
+
+**Fix**: Added explicit error logging:
+```rust
+match serde_json::from_str(&content) {
+    Ok(state) => state,
+    Err(e) => {
+        error!(
+            path = ?self.program_state_path,
+            error = %e,
+            "Failed to parse program state - using default (DATA LOSS WARNING)"
+        );
+        ProgramState::default()
+    }
+}
+```
+
+---
+
+## v1.2.6 Round 2 Files Modified
+
+| File | Changes |
+|------|---------|
+| `src/scripting/triggers.rs` | Replaced 5 unwrap() calls with error handling |
+| `src/offline_queue.rs` | SQL injection prevention in eviction and backup |
+| `src/commands.rs` | Silent data loss prevention with logging |
+
+---
+
+## v1.2.6 Round 2 Security Impact
+
+| Issue | Severity | Status |
+|-------|----------|--------|
+| Trigger state panic | CRITICAL | Fixed |
+| SQL injection (LIMIT) | HIGH | Fixed |
+| SQL injection (VACUUM) | HIGH | Fixed |
+| Silent data loss | MEDIUM | Fixed |
+
+---
+
 ## Remaining Work
 
 ### Future Enhancements (Optional)

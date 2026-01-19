@@ -1329,10 +1329,32 @@ impl CommandHandler {
     }
 
     /// Load program state from disk
+    /// v1.2.6: Added error logging to prevent silent data loss
     fn load_program_state(&self) -> ProgramState {
         match fs::read_to_string(&self.program_state_path) {
-            Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
-            Err(_) => ProgramState::default(),
+            Ok(content) => match serde_json::from_str(&content) {
+                Ok(state) => state,
+                Err(e) => {
+                    error!(
+                        path = ?self.program_state_path,
+                        error = %e,
+                        "Failed to parse program state - using default (DATA LOSS WARNING)"
+                    );
+                    ProgramState::default()
+                }
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                debug!(path = ?self.program_state_path, "Program state file not found - using default");
+                ProgramState::default()
+            }
+            Err(e) => {
+                warn!(
+                    path = ?self.program_state_path,
+                    error = %e,
+                    "Failed to read program state file - using default"
+                );
+                ProgramState::default()
+            }
         }
     }
 
