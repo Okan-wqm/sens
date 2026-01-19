@@ -14,13 +14,15 @@
 4. [Hardware Interfaces](#4-hardware-interfaces)
 5. [Scripting Engine](#5-scripting-engine)
 6. [Function Blocks (IEC 61131-3)](#6-function-blocks-iec-61131-3)
-7. [Offline Queue](#7-offline-queue)
-8. [Resilience Patterns](#8-resilience-patterns)
-9. [HTTP Health API](#9-http-health-api)
-10. [Security](#10-security)
-11. [Configuration](#11-configuration)
-12. [Provisioning](#12-provisioning)
-13. [Limits & Defaults](#13-limits--defaults)
+7. [Alarm Management (IEC 62682)](#7-alarm-management-iec-62682)
+8. [Backup & Restore](#8-backup--restore)
+9. [Offline Queue](#9-offline-queue)
+10. [Resilience Patterns](#10-resilience-patterns)
+11. [HTTP Health API](#11-http-health-api)
+12. [Security](#12-security)
+13. [Configuration](#13-configuration)
+14. [Provisioning](#14-provisioning)
+15. [Limits & Defaults](#15-limits--defaults)
 
 ---
 
@@ -57,6 +59,20 @@ tenants/{tenant_id}/devices/{device_id}/config      # Config updates (subscribe)
 | Channel Capacity | 500 messages | - |
 | Reconnect Min | 1s | - |
 | Reconnect Max | 60s | - |
+
+### 1.4 Last Will & Testament
+
+MQTT Last Will message support for detecting unexpected disconnections.
+
+```yaml
+mqtt:
+  lastWillTopic: "tenants/{tenant_id}/devices/{device_id}/status"
+  lastWillMessage: '{"status": "offline", "reason": "unexpected"}'
+  lastWillQos: 1
+  lastWillRetain: true
+```
+
+When the device disconnects unexpectedly, the broker automatically publishes the Last Will message.
 
 ---
 
@@ -525,6 +541,160 @@ gpio:
 | `input` | `up`, `down`, `none` |
 | `output` | `none` |
 
+### 4.3 I2C (Inter-Integrated Circuit)
+
+I2C support for sensors, displays, and other I2C peripherals.
+
+#### I2C Buses (Raspberry Pi)
+
+| Bus | SDA | SCL | Usage |
+|-----|-----|-----|-------|
+| I2C1 | GPIO 2 | GPIO 3 | Primary bus |
+| I2C0 | GPIO 0 | GPIO 1 | Reserved for HAT EEPROM |
+
+#### Supported Devices
+
+| Device | Address | Description |
+|--------|---------|-------------|
+| BME280 | 0x76/0x77 | Temperature, humidity, pressure |
+| SHT31 | 0x44/0x45 | Temperature, humidity |
+| ADS1115 | 0x48-0x4B | 16-bit ADC |
+| PCA9685 | 0x40-0x7F | 16-channel PWM |
+
+#### Configuration
+
+```yaml
+i2c:
+  - name: "temp_sensor"
+    address: 0x76
+    bus: 1
+    clockSpeedHz: 100000
+    description: "BME280 temperature sensor"
+```
+
+| Parameter | Default | Range |
+|-----------|---------|-------|
+| bus | 1 | 0-1 |
+| clockSpeedHz | 100000 | 100000-400000 |
+| address | - | 0x03-0x77 |
+
+#### Operations
+
+| Operation | Description |
+|-----------|-------------|
+| `read_register` | Read bytes from a register |
+| `write_register` | Write bytes to a register |
+| `read_direct` | Read without register address |
+| `write_direct` | Write without register address |
+| `scan` | Scan bus for devices |
+| `probe` | Check if device is present |
+
+### 4.4 PWM (Pulse Width Modulation)
+
+PWM support for motor control, LED dimming, and servo control.
+
+#### Hardware PWM Channels
+
+| Channel | GPIO Pins |
+|---------|-----------|
+| PWM0 | GPIO 12 (Alt0), GPIO 18 (Alt5) |
+| PWM1 | GPIO 13 (Alt0), GPIO 19 (Alt5) |
+
+#### Configuration
+
+```yaml
+pwm:
+  - name: "motor1"
+    pin: 18
+    frequencyHz: 25000.0
+    initialDutyCycle: 0.0
+    hardware: true
+    servoMode: false
+```
+
+| Parameter | Default | Range |
+|-----------|---------|-------|
+| frequencyHz | 1000.0 | 1-100000 |
+| initialDutyCycle | 0.0 | 0.0-1.0 |
+| hardware | true | - |
+| servoMode | false | - |
+
+#### Servo Mode
+
+When `servoMode: true`:
+- Frequency: 50 Hz
+- Pulse width: 1ms (0%) to 2ms (100%)
+- Position 0.0-1.0 maps to servo angle
+
+#### Operations
+
+| Operation | Description |
+|-----------|-------------|
+| `set_duty_cycle` | Set duty cycle (0.0-1.0) |
+| `set_frequency` | Change frequency |
+| `set_servo_position` | Set servo position (0.0-1.0) |
+| `set_enabled` | Enable/disable channel |
+
+### 4.5 SPI (Serial Peripheral Interface)
+
+SPI support for high-speed peripherals like ADCs, DACs, and flash memory.
+
+#### SPI Buses (Raspberry Pi)
+
+| Bus | CE0 | CE1 | MOSI | MISO | SCLK |
+|-----|-----|-----|------|------|------|
+| SPI0 | GPIO 8 | GPIO 7 | GPIO 10 | GPIO 9 | GPIO 11 |
+| SPI1 | GPIO 18 | GPIO 17 | GPIO 20 | GPIO 19 | GPIO 21 |
+
+#### Supported Devices
+
+| Device | Description |
+|--------|-------------|
+| MCP3008 | 8-channel 10-bit ADC |
+| MCP3208 | 8-channel 12-bit ADC |
+| MAX31855 | Thermocouple interface |
+| W25Q series | Flash memory |
+
+#### SPI Modes
+
+| Mode | CPOL | CPHA | Description |
+|------|------|------|-------------|
+| Mode0 | 0 | 0 | Clock idle low, sample on rising edge |
+| Mode1 | 0 | 1 | Clock idle low, sample on falling edge |
+| Mode2 | 1 | 0 | Clock idle high, sample on falling edge |
+| Mode3 | 1 | 1 | Clock idle high, sample on rising edge |
+
+#### Configuration
+
+```yaml
+spi:
+  - name: "adc"
+    bus: 0
+    chipSelect: 0
+    clockSpeedHz: 1000000
+    mode: "Mode0"
+    bitOrder: "MsbFirst"
+    bitsPerWord: 8
+```
+
+| Parameter | Default | Range |
+|-----------|---------|-------|
+| bus | 0 | 0-1 |
+| chipSelect | 0 | 0-2 |
+| clockSpeedHz | 1000000 | 100000-32000000 |
+| mode | Mode0 | Mode0-Mode3 |
+| bitOrder | MsbFirst | MsbFirst, LsbFirst |
+| bitsPerWord | 8 | 8 |
+
+#### Operations
+
+| Operation | Description |
+|-----------|-------------|
+| `transfer` | Full-duplex read/write |
+| `write` | Write only (discard received) |
+| `read` | Read only (send zeros) |
+| `set_clock_speed` | Change clock speed |
+
 ---
 
 ## 5. Scripting Engine
@@ -573,9 +743,10 @@ gpio:
 
 | Priority | Value | Description |
 |----------|-------|-------------|
-| `critical` | 3 | Safety-critical |
-| `high` | 2 | Important |
-| `normal` | 1 | Default |
+| `emergency` | 255 | Highest priority, system override |
+| `critical` | 200 | Safety-critical |
+| `high` | 100 | Important |
+| `normal` | 50 | Default |
 | `low` | 0 | Background |
 
 ### 5.3 Trigger Types
@@ -669,12 +840,35 @@ Agent başlangıcında çalıştır.
 }
 ```
 
-| Type | Source Format |
-|------|---------------|
-| `sensor` | `sensor:register_name` |
-| `gpio` | `gpio:pin_number` |
-| `variable` | `var:variable_name` |
-| `system` | `system:uptime` |
+| Type | Source Format | Example |
+|------|---------------|---------|
+| `sensor` | `sensor:register_name` | `sensor:temperature` |
+| `gpio` | `gpio:pin_number` | `gpio:17` |
+| `variable` | `var:variable_name` | `var:counter` |
+| `time` | `time:component` | `time:hour`, `time:minute`, `time:weekday` |
+| `system` | `system:metric` | `system:uptime` |
+
+#### Time Condition
+
+Check time-based conditions:
+
+```json
+{
+  "type": "time",
+  "source": "time:hour",
+  "operator": "between",
+  "value": [8, 17]
+}
+```
+
+| Time Source | Range | Description |
+|-------------|-------|-------------|
+| `time:hour` | 0-23 | Hour of day |
+| `time:minute` | 0-59 | Minute of hour |
+| `time:second` | 0-59 | Second of minute |
+| `time:weekday` | 0-6 | Day of week (0=Sunday) |
+| `time:day` | 1-31 | Day of month |
+| `time:month` | 1-12 | Month of year |
 
 ### 5.6 Action Types
 
@@ -776,7 +970,41 @@ Max: 30000ms
 }
 ```
 
-### 5.7 Variable Interpolation
+#### `noop`
+No operation - useful for conditional skipping.
+```json
+{
+  "type": "noop"
+}
+```
+
+### 5.7 Action Conditions
+
+Actions can have conditions to control execution:
+
+```json
+{
+  "type": "set_gpio",
+  "target": "17",
+  "value": true,
+  "condition": {
+    "source": "var:override",
+    "operator": "eq",
+    "value": false
+  }
+}
+```
+
+### 5.8 Alert Levels
+
+| Level | Description |
+|-------|-------------|
+| `info` | Informational |
+| `warning` | Warning (default) |
+| `error` | Error condition |
+| `critical` | Critical alert |
+
+### 5.9 Variable Interpolation
 
 Template syntax: `${source:name}`
 
@@ -850,6 +1078,9 @@ IN rising edge'de tam PT ms boyunca Q true.
 ### 6.2 Counter Function Blocks
 
 #### CTU (Count Up)
+
+Counts up on each rising edge of CU input. Q becomes TRUE when CV >= PV.
+
 ```json
 {
   "id": "piece_counter",
@@ -868,7 +1099,88 @@ IN rising edge'de tam PT ms boyunca Q true.
 }
 ```
 
+| Input | Type | Description |
+|-------|------|-------------|
+| CU | bool | Count up (rising edge) |
+| R | bool | Reset (sets CV to 0) |
+| PV | i32 | Preset value |
+
+| Output | Type | Description |
+|--------|------|-------------|
+| Q | bool | CV >= PV |
+| CV | i32 | Current count |
+
 #### CTD (Count Down)
+
+Counts down on each rising edge of CD input. Q becomes TRUE when CV <= 0.
+
+```json
+{
+  "id": "countdown",
+  "type": "CTD",
+  "params": {
+    "pv": 10
+  },
+  "inputs": {
+    "CD": "gpio:18",
+    "LD": "var:load"
+  },
+  "outputs": {
+    "Q": "var:done",
+    "CV": "var:remaining"
+  }
+}
+```
+
+| Input | Type | Description |
+|-------|------|-------------|
+| CD | bool | Count down (rising edge) |
+| LD | bool | Load (sets CV to PV) |
+| PV | i32 | Preset value |
+
+| Output | Type | Description |
+|--------|------|-------------|
+| Q | bool | CV <= 0 |
+| CV | i32 | Current count |
+
+#### CTUD (Count Up/Down)
+
+Bidirectional counter with separate up and down inputs.
+
+```json
+{
+  "id": "bidirectional",
+  "type": "CTUD",
+  "params": {
+    "pv": 100
+  },
+  "inputs": {
+    "CU": "gpio:17",
+    "CD": "gpio:18",
+    "R": "var:reset",
+    "LD": "var:load"
+  },
+  "outputs": {
+    "QU": "var:upper_limit",
+    "QD": "var:lower_limit",
+    "CV": "var:count"
+  }
+}
+```
+
+| Input | Type | Description |
+|-------|------|-------------|
+| CU | bool | Count up (rising edge) |
+| CD | bool | Count down (rising edge) |
+| R | bool | Reset (sets CV to 0) |
+| LD | bool | Load (sets CV to PV) |
+| PV | i32 | Preset value |
+
+| Output | Type | Description |
+|--------|------|-------------|
+| QU | bool | CV >= PV (upper limit) |
+| QD | bool | CV <= 0 (lower limit) |
+| CV | i32 | Current count |
 
 ### 6.3 Edge & Flip-Flop Blocks
 
@@ -880,6 +1192,9 @@ IN rising edge'de tam PT ms boyunca Q true.
 ### 6.4 Controller Blocks
 
 #### PID Controller
+
+Standard PID controller with anti-windup and output limiting.
+
 ```json
 {
   "id": "temp_pid",
@@ -902,6 +1217,97 @@ IN rising edge'de tam PT ms boyunca Q true.
 }
 ```
 
+| Input | Type | Description |
+|-------|------|-------------|
+| SP | f64 | Setpoint (desired value) |
+| PV | f64 | Process Variable (measured value) |
+| KP | f64 | Proportional gain |
+| KI | f64 | Integral gain (1/s) |
+| KD | f64 | Derivative gain (s) |
+| OUT_MIN | f64 | Minimum output limit |
+| OUT_MAX | f64 | Maximum output limit |
+| MANUAL | bool | Manual mode enable |
+| MAN_OUT | f64 | Manual output value |
+| RESET | bool | Reset integrator |
+
+| Output | Type | Description |
+|--------|------|-------------|
+| OUT | f64 | Controller output |
+| ERROR | f64 | Current error (SP - PV) |
+| P_TERM | f64 | Proportional term |
+| I_TERM | f64 | Integral term |
+| D_TERM | f64 | Derivative term |
+| SATURATED | bool | Output is at limit |
+
+#### MAVG (Moving Average Filter)
+
+Smooths noisy sensor readings with configurable window.
+
+```json
+{
+  "id": "smooth_temp",
+  "type": "MAVG",
+  "params": {
+    "n": 10
+  },
+  "inputs": {
+    "IN": "sensor:raw_temperature"
+  },
+  "outputs": {
+    "OUT": "sensor:filtered_temperature",
+    "VALID": "var:filter_ready"
+  }
+}
+```
+
+| Input | Type | Description |
+|-------|------|-------------|
+| IN | f64 | Input value to filter |
+| N | u32 | Window size (1-1000, default: 10) |
+| RESET | bool | Clear the filter buffer |
+
+| Output | Type | Description |
+|--------|------|-------------|
+| OUT | f64 | Filtered output (moving average) |
+| VALID | bool | True when buffer is full |
+| COUNT | u32 | Current samples in buffer |
+
+#### HYSTERESIS (Schmitt Trigger)
+
+Prevents oscillation around a setpoint.
+
+```json
+{
+  "id": "thermostat",
+  "type": "HYSTERESIS",
+  "params": {
+    "high": 25.0,
+    "low": 22.0
+  },
+  "inputs": {
+    "IN": "sensor:temperature"
+  },
+  "outputs": {
+    "OUT": "var:cooling_on"
+  }
+}
+```
+
+| Input | Type | Description |
+|-------|------|-------------|
+| IN | f64 | Input value |
+| HIGH | f64 | High threshold (turn on) |
+| LOW | f64 | Low threshold (turn off) |
+
+| Output | Type | Description |
+|--------|------|-------------|
+| OUT | bool | Output state |
+
+Behavior:
+- When OFF: turns ON when IN > HIGH
+- When ON: turns OFF when IN < LOW
+- Stays unchanged when LOW <= IN <= HIGH
+
 ### 6.5 Input Wiring Sources
 
 | Source | Format | Example |
@@ -921,9 +1327,207 @@ IN rising edge'de tam PT ms boyunca Q true.
 
 ---
 
-## 7. Offline Queue
+## 7. Alarm Management (IEC 62682)
 
-### 7.1 Priority Levels
+Alarm management following IEC 62682 standard for industrial automation.
+
+### 7.1 Alarm Priority Levels
+
+| Priority | Value | Description |
+|----------|-------|-------------|
+| `diagnostic` | 0 | Informational only, no action required |
+| `low` | 1 | Action required within extended timeframe |
+| `medium` | 2 | Action required within normal timeframe |
+| `high` | 3 | Immediate action required |
+| `critical` | 4 | Emergency, safety-related |
+
+### 7.2 Alarm States
+
+| State | Description |
+|-------|-------------|
+| `Normal` | Alarm condition not present |
+| `Active` | Alarm condition present, not acknowledged |
+| `Acknowledged` | Alarm condition present, operator acknowledged |
+| `ReturnedUnack` | Condition cleared but not acknowledged |
+| `Shelved` | Temporarily suppressed by operator |
+| `Suppressed` | Suppressed by design (maintenance) |
+| `OutOfService` | Alarm point disabled |
+
+### 7.3 Alarm Types
+
+| Type | Description |
+|------|-------------|
+| `High` | High limit exceeded |
+| `HighHigh` | Critical high limit exceeded |
+| `Low` | Low limit exceeded |
+| `LowLow` | Critical low limit exceeded |
+| `Deviation` | Deviation from setpoint |
+| `RateOfChange` | Rate of change exceeded |
+| `Digital` | Digital state change |
+| `Fault` | Equipment fault |
+| `Communication` | Communication failure |
+
+### 7.4 Alarm Configuration
+
+```yaml
+alarms:
+  - id: "temp_high"
+    name: "Temperature High"
+    description: "Water temperature exceeded safe limit"
+    alarmType: "high"
+    priority: "high"
+    source: "sensor:water_temp"
+    setpoint: 85.0
+    deadband: 2.0
+    delayMs: 1000
+    enabled: true
+    requireAck: true
+```
+
+### 7.5 Dead-band Support
+
+Dead-band prevents alarm chatter around the setpoint:
+- Alarm activates when value exceeds setpoint
+- Alarm clears when value drops below (setpoint - deadband)
+
+### 7.6 Alarm Events
+
+| Event | Description |
+|-------|-------------|
+| `Activated` | Alarm became active |
+| `Acknowledged` | Operator acknowledged |
+| `Returned` | Returned to normal (unacknowledged) |
+| `Cleared` | Fully cleared (acknowledged + returned) |
+| `Reactivated` | Condition returned while unacknowledged |
+| `Shelved` | Temporarily suppressed |
+| `Unshelved` | Removed from shelf |
+
+### 7.7 Alarm Journal
+
+Alarm history is maintained with maximum 1000 entries.
+
+```json
+{
+  "timestamp": "2026-01-19T12:00:00.123Z",
+  "event": {
+    "type": "activated",
+    "alarm_id": "temp_high",
+    "value": 86.5,
+    "priority": "high"
+  },
+  "alarm_name": "Temperature High",
+  "priority": "high"
+}
+```
+
+---
+
+## 8. Backup & Restore
+
+Backup and restore functionality for disaster recovery (IEC 62443 SL2 FR7 compliance).
+
+### 8.1 Backup Contents
+
+| Item | Description |
+|------|-------------|
+| Configuration | YAML configuration (sanitized) |
+| Scripts | All script definitions |
+| FB States | Function block states |
+| Variables | Persisted variables |
+| Triggers | Trigger states |
+
+### 8.2 Backup File Format
+
+- Extension: `.sdb` (Suderra Database Backup)
+- Magic header: `SUDERRA\x00`
+- Compression: gzip
+- Max size: 100 MB
+
+### 8.3 Backup Configuration
+
+```yaml
+backup:
+  directory: "/var/lib/suderra/backups"
+  maxBackups: 10
+  autoBackupOnDeploy: true
+```
+
+### 8.4 Backup Commands
+
+#### Create Backup
+```json
+{
+  "command": "create_backup",
+  "params": {
+    "description": "Pre-upgrade backup"
+  }
+}
+```
+
+Response:
+```json
+{
+  "success": true,
+  "result": {
+    "path": "/var/lib/suderra/backups/backup_20260119_120000_123.sdb",
+    "size_bytes": 524288
+  }
+}
+```
+
+#### List Backups
+```json
+{
+  "command": "list_backups"
+}
+```
+
+Response:
+```json
+{
+  "success": true,
+  "result": {
+    "backups": [
+      {
+        "path": "/var/lib/suderra/backups/backup_20260119_120000_123.sdb",
+        "size_bytes": 524288,
+        "created_at": "2026-01-19T12:00:00.123Z",
+        "agent_version": "1.2.6",
+        "description": "Pre-upgrade backup",
+        "script_count": 5,
+        "variable_count": 12
+      }
+    ]
+  }
+}
+```
+
+#### Restore Backup
+```json
+{
+  "command": "restore_backup",
+  "params": {
+    "path": "/var/lib/suderra/backups/backup_20260119_120000_123.sdb",
+    "verifyDeviceId": true
+  }
+}
+```
+
+### 8.5 Device ID Verification
+
+Backups include the device ID. On restore:
+- `verifyDeviceId: true` - Fails if device ID doesn't match
+- `verifyDeviceId: false` - Allows cross-device restore
+
+### 8.6 Rolling Backups
+
+When `maxBackups` is exceeded, oldest backups are automatically deleted.
+
+---
+
+## 9. Offline Queue
+
+### 9.1 Priority Levels
 
 | Priority | Value | Use Case |
 |----------|-------|----------|
@@ -932,7 +1536,7 @@ IN rising edge'de tam PT ms boyunca Q true.
 | Normal | 1 | Regular telemetry |
 | Low | 0 | Background data |
 
-### 7.2 Configuration
+### 9.2 Configuration
 
 | Parameter | Default | Range |
 |-----------|---------|-------|
@@ -940,14 +1544,14 @@ IN rising edge'de tam PT ms boyunca Q true.
 | Max Age | 3600s | - |
 | Max Disk | 50 MB | 1 MB-unlimited |
 
-### 7.3 Behavior
+### 9.3 Behavior
 
 - **Enqueue**: Priority-based eviction when full
 - **Dequeue**: Priority DESC, FIFO within priority
 - **Disk Limit**: Auto-evict when 80%+ usage
 - **Persistence**: SQLite with WAL mode
 
-### 7.4 Statistics
+### 9.4 Statistics
 
 ```json
 {
@@ -960,11 +1564,29 @@ IN rising edge'de tam PT ms boyunca Q true.
 }
 ```
 
+### 9.5 Advanced Operations
+
+| Operation | Description |
+|-----------|-------------|
+| `vacuum()` | Reclaim disk space, returns freed bytes |
+| `vacuum_if_needed()` | Auto-vacuum when 80%+ disk used |
+| `backup_to(path)` | Backup queue to file |
+| `backup_rolling(dir, max)` | Rolling backup with retention |
+| `integrity_check()` | Full database integrity verification |
+| `quick_check()` | Fast sanity check |
+| `nack(id)` | Negative acknowledge (requeue message) |
+| `peek_batch(count)` | Peek multiple messages |
+| `ack_batch(ids)` | Acknowledge multiple messages |
+
+### 9.6 Async Support
+
+`AsyncOfflineQueue` wrapper provides Tokio-compatible async API for all operations.
+
 ---
 
-## 8. Resilience Patterns
+## 10. Resilience Patterns
 
-### 8.1 Circuit Breaker
+### 10.1 Circuit Breaker
 
 #### States
 
@@ -986,7 +1608,7 @@ CLOSED ─(N failures)─→ OPEN
 | Recovery Timeout | 30s |
 | Half-Open Permits | 1 |
 
-### 8.2 Rate Limiting
+### 10.2 Rate Limiting
 
 | Resource | Limit | Window |
 |----------|-------|--------|
@@ -994,7 +1616,7 @@ CLOSED ─(N failures)─→ OPEN
 | Modbus ops | 10/s | Burst: 20 |
 | Scripts | Per-script | 60s |
 
-### 8.3 Retry Logic
+### 10.3 Retry Logic
 
 | Operation | Max Retries | Backoff |
 |-----------|-------------|---------|
@@ -1004,7 +1626,7 @@ CLOSED ─(N failures)─→ OPEN
 
 ---
 
-## 9. HTTP Health API
+## 11. HTTP Health API
 
 **Build:** `cargo build --features health`
 **Port:** 8080 (configurable)
@@ -1053,18 +1675,80 @@ CLOSED ─(N failures)─→ OPEN
 
 ### GET /diagnostics
 
-Comprehensive system diagnostics including:
-- System info (OS, CPU, memory, disk)
-- Process info (PID, threads, memory)
-- Component status (MQTT, Modbus, Scripts, FBs, Queue)
-- Configuration summary (sanitized)
-- Recent errors (last 10)
+Comprehensive system diagnostics including all component details:
+
+```json
+{
+  "system": {
+    "os": "Linux",
+    "os_version": "6.1.0-rpi",
+    "architecture": "aarch64",
+    "cpu_cores": 4,
+    "total_memory_mb": 8192,
+    "load_average": [0.5, 0.4, 0.3]
+  },
+  "disk": {
+    "total_bytes": 32000000000,
+    "free_bytes": 28000000000,
+    "usage_percent": 12.5
+  },
+  "process": {
+    "pid": 12345,
+    "threads": 8,
+    "memory_rss_mb": 45,
+    "uptime_secs": 3600
+  },
+  "mqtt": {
+    "connected": true,
+    "messages_sent": 1000,
+    "messages_received": 500,
+    "circuit_breaker_state": "CLOSED"
+  },
+  "modbus": {
+    "plc1": {
+      "connected": true,
+      "circuit_breaker_state": "CLOSED",
+      "read_count": 1500,
+      "write_count": 200,
+      "error_count": 0
+    }
+  },
+  "scripts": {
+    "loaded_count": 5,
+    "active_count": 3,
+    "execution_count": 12500,
+    "error_count": 0
+  },
+  "function_blocks": {
+    "instance_count": 12,
+    "types": {"TON": 3, "PID": 2, "CTU": 4, "MAVG": 3}
+  },
+  "offline_queue": {
+    "size": 0,
+    "capacity": 10000,
+    "db_size_bytes": 1048576
+  },
+  "config": {
+    "device_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+    "telemetry_interval_secs": 60,
+    "modbus_device_count": 2,
+    "gpio_pin_count": 5
+  },
+  "recent_errors": [
+    {
+      "timestamp": "2026-01-19T12:00:00Z",
+      "component": "modbus",
+      "message": "Connection timeout"
+    }
+  ]
+}
+```
 
 ---
 
-## 10. Security
+## 12. Security
 
-### 10.1 TLS/mTLS
+### 12.1 TLS/mTLS
 
 #### MQTT TLS
 ```yaml
@@ -1087,14 +1771,14 @@ modbus:
       insecureSkipVerify: false
 ```
 
-### 10.2 Credential Protection
+### 12.2 Credential Protection
 
 - Secrets stored with `secrecy` crate
 - Auto-zeroized on drop
 - Masked in logs: `[REDACTED]`
 - File permissions: 0600 required
 
-### 10.3 Input Validation
+### 12.3 Input Validation
 
 | Field | Validation |
 |-------|------------|
@@ -1104,7 +1788,7 @@ modbus:
 | Modbus Slave | 1-247 |
 | Telemetry Interval | 5-3600s |
 
-### 10.4 IEC 62443 SL2 Compliance
+### 12.4 IEC 62443 SL2 Compliance
 
 | Requirement | Implementation |
 |-------------|----------------|
@@ -1116,15 +1800,111 @@ modbus:
 
 ---
 
-## 11. Configuration
+## 13. Configuration
 
-### 11.1 Config File Path
+### 13.1 Config File Path
 
 1. `$SUDERRA_CONFIG` environment variable
 2. `/etc/suderra/config.yaml`
 3. `./config.yaml`
 
-### 11.2 Full Configuration Schema
+### 13.2 Additional Configuration Options
+
+#### Telemetry Options
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `includeSystem` | true | Include system metrics (uptime, load) |
+
+#### Cache Configuration
+
+```yaml
+cache:
+  maxCapacity: 10000
+  ttlSecs: 300
+  ttiSecs: 60
+```
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `maxCapacity` | 10000 | Maximum cache entries |
+| `ttlSecs` | 300 | Time-to-live (0 = no TTL) |
+| `ttiSecs` | 60 | Time-to-idle (0 = no TTI) |
+
+#### Circuit Breaker Configuration
+
+```yaml
+circuitBreaker:
+  failureThreshold: 3
+  successThreshold: 2
+  recoverySecs: 30
+  halfOpenPermits: 1
+```
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `failureThreshold` | 3 | Failures before opening circuit |
+| `successThreshold` | 2 | Successes to close circuit |
+| `recoverySecs` | 30 | Wait time before recovery |
+| `halfOpenPermits` | 1 | Max concurrent in half-open |
+
+#### OpenTelemetry (OTLP) Configuration
+
+```yaml
+telemetry:
+  otlp:
+    endpoint: "http://localhost:4317"
+    serviceName: "suderra-agent"
+    sampleRatio: 1.0
+```
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `endpoint` | - | OTLP endpoint URL |
+| `serviceName` | suderra-agent | Service name for traces |
+| `sampleRatio` | 1.0 | Trace sample ratio (0.0-1.0) |
+
+#### Runtime Timeouts
+
+```yaml
+runtime:
+  gpioTimeoutSecs: 5
+  modbusTimeoutSecs: 5
+  modbusConnectTimeoutSecs: 5
+  provisioningTimeoutSecs: 30
+  shutdownTimeoutSecs: 10
+  mqttReconnectMinSecs: 1
+  mqttReconnectMaxSecs: 60
+```
+
+#### Scripting Limits
+
+```yaml
+scripting:
+  minScanCycleMs: 10
+  maxScanCycleMs: 10000
+```
+
+#### GPIO Options
+
+```yaml
+gpio:
+  - name: "button1"
+    pin: 18
+    direction: "input"
+    debounceMs: 50
+```
+
+#### Modbus TLS Options
+
+```yaml
+modbus:
+  - tls:
+      serverName: "plc.local"
+      insecureSkipVerify: false
+```
+
+### 13.3 Full Configuration Schema
 
 ```yaml
 # Device Identity
@@ -1209,9 +1989,9 @@ runtime:
 
 ---
 
-## 12. Provisioning
+## 14. Provisioning
 
-### 12.1 Activation Flow
+### 14.1 Activation Flow
 
 ```
 1. Agent starts with provisioning token
@@ -1223,7 +2003,7 @@ runtime:
 7. Publish online status
 ```
 
-### 12.2 Activation Request
+### 14.2 Activation Request
 
 ```json
 {
@@ -1239,7 +2019,7 @@ runtime:
 }
 ```
 
-### 12.3 Activation Response
+### 14.3 Activation Response
 
 ```json
 {
@@ -1255,26 +2035,71 @@ runtime:
 
 ---
 
-## 13. Limits & Defaults
+## 15. Limits & Defaults
+
+### Core Limits
 
 | Parameter | Default | Min | Max |
 |-----------|---------|-----|-----|
 | Telemetry Interval | 30s | 5s | 3600s |
 | MQTT Keep-alive | 30s | 1s | 3600s |
 | MQTT Channel | 500 msgs | - | - |
+| MQTT Reconnect Min | 1s | - | - |
+| MQTT Reconnect Max | 60s | - | - |
 | Scan Cycle | 100ms | 10ms | 10000ms |
 | Script Max Depth | 10 | 1 | 1000 |
 | Script Max Actions | 100 | 1 | 10000 |
 | Script Max Time | 30s | 1s | 300s |
 | Circuit Breaker Recovery | 30s | 1s | 3600s |
+| Circuit Breaker Failures | 3 | 1 | 100 |
 | Command Rate Limit | 60/min | 1 | 1000 |
 | Modbus Rate Limit | 10/s | 1 | 100 |
 | Modbus Timeout | 5s | 1s | 60s |
 | GPIO Timeout | 5s | 1s | 60s |
+| Provisioning Timeout | 30s | 5s | 300s |
+| Shutdown Timeout | 10s | 1s | 60s |
+
+### Queue & Storage
+
+| Parameter | Default | Min | Max |
+|-----------|---------|-----|-----|
 | Offline Queue Max | 1000 | 100 | 1000000 |
 | Offline Queue Disk | 50 MB | 1 MB | - |
 | Max FBs | 100 | 1 | 1000 |
+| Max Backups | 10 | 1 | 100 |
+| Backup Max Size | 100 MB | - | - |
+| Alarm Journal Max | 1000 | 10 | 10000 |
+
+### Cache
+
+| Parameter | Default | Min | Max |
+|-----------|---------|-----|-----|
+| Cache Max Capacity | 10000 | 100 | 1000000 |
+| Cache TTL | 300s | 0 | - |
+| Cache TTI | 60s | 0 | - |
+
+### Hardware Interfaces
+
+| Parameter | Default | Min | Max |
+|-----------|---------|-----|-----|
+| I2C Clock Speed | 100kHz | 100kHz | 400kHz |
+| I2C Address Range | - | 0x03 | 0x77 |
+| PWM Frequency | 1kHz | 1Hz | 100kHz |
+| PWM Duty Cycle | 0.0 | 0.0 | 1.0 |
+| SPI Clock Speed | 1MHz | 100kHz | 32MHz |
+| MAVG Window Size | 10 | 1 | 1000 |
+
+### Priority Values
+
+| Priority Level | Script | Offline Queue | Alarm |
+|----------------|--------|---------------|-------|
+| Emergency | 255 | - | - |
+| Critical | 200 | 3 | 4 |
+| High | 100 | 2 | 3 |
+| Normal | 50 | 1 | 2 |
+| Low | 0 | 0 | 1 |
+| Diagnostic | - | - | 0 |
 
 ---
 
-*Generated by Suderra AS*
+*Generated by Suderra AS - v1.2.6*
