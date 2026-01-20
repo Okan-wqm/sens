@@ -224,22 +224,35 @@ impl EtherNetIpClient {
     }
 
     /// Build CIP Read Tag request
+    ///
+    /// CIP symbolic segment uses 1-byte length field, so tag names are limited to 255 bytes.
     fn build_read_tag(&self, tag_name: &str) -> Vec<u8> {
+        let tag_bytes = tag_name.as_bytes();
+
+        // CIP symbolic segment uses 1-byte length field (max 255 bytes)
+        if tag_bytes.len() > 255 {
+            warn!(
+                "Tag name '{}' exceeds CIP max length (255 bytes), truncating",
+                &tag_name[..50.min(tag_name.len())]
+            );
+        }
+        let tag_len = tag_bytes.len().min(255);
+        let tag_bytes = &tag_bytes[..tag_len];
+
         let mut request = Vec::new();
 
         // Service code
         request.push(CIP_READ_TAG);
 
         // Path size (in words)
-        let tag_bytes = tag_name.as_bytes();
-        let path_size = (2 + tag_bytes.len() + (tag_bytes.len() % 2)) / 2;
+        let path_size = (2 + tag_len + (tag_len % 2)) / 2;
         request.push(path_size as u8);
 
         // Symbolic segment
         request.push(0x91);
-        request.push(tag_bytes.len() as u8);
+        request.push(tag_len as u8);
         request.extend_from_slice(tag_bytes);
-        if tag_bytes.len() % 2 == 1 {
+        if tag_len % 2 == 1 {
             request.push(0x00); // Pad
         }
 

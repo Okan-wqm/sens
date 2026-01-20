@@ -543,7 +543,8 @@ impl PlcProgrammer for OpcUaClient {
         let response = self.send_receive(&open_channel).await?;
 
         // Parse secure channel response
-        if response.len() > 16 {
+        // Need at least 12 bytes to access indices [8..11] for channel_id
+        if response.len() >= 12 {
             let channel_id = u32::from_le_bytes([response[8], response[9], response[10], response[11]]);
             *self.secure_channel_id.lock().await = channel_id;
             debug!("OPC UA Secure channel opened: {}", channel_id);

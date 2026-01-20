@@ -1086,6 +1086,10 @@ impl ScriptEngine {
                 .update_result(script_id, true, "Conditions not met - skipped")
                 .await;
 
+            // v2.2.1: Restore script context before early return to prevent context corruption
+            self.current_script_id = prev_script_id;
+            self.current_script_priority = prev_script_priority;
+
             return Ok(ExecutionResult {
                 script_id: script_id.to_string(),
                 success: true,
