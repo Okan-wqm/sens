@@ -281,7 +281,8 @@ impl CircuitBreaker {
                         // v1.2.6: Enhanced state transition logging
                         tracing::info!(
                             "🟢 Circuit breaker '{}': HALF-OPEN → CLOSED (recovered after {} successes)",
-                            self.name, count
+                            self.name,
+                            count
                         );
                     }
                 }

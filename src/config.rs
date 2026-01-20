@@ -1061,10 +1061,7 @@ impl AgentConfig {
 
         // Validate host structure
         if host.is_empty() {
-            anyhow::bail!(
-                "api_url '{}' appears invalid (missing host)",
-                self.api_url
-            );
+            anyhow::bail!("api_url '{}' appears invalid (missing host)", self.api_url);
         }
         if host.starts_with('.') || host.ends_with('.') {
             anyhow::bail!(

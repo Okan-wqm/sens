@@ -22,11 +22,11 @@
 
 use super::common::*;
 use super::{PlcProgram, PlcProgrammer, PlcRunMode, PlcStatus, UploadResult};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
@@ -257,7 +257,10 @@ impl CodesysClient {
     /// Header structure: magic[0:4] + length[4:8] + service_id[8:10] + reserved[10:12] + payload_len[12:16]
     fn parse_response(&self, data: &[u8]) -> Result<(ResponseCode, Vec<u8>)> {
         if data.len() < 16 {
-            return Err(anyhow!("Response too short (need 16 bytes header, got {})", data.len()));
+            return Err(anyhow!(
+                "Response too short (need 16 bytes header, got {})",
+                data.len()
+            ));
         }
 
         // Check magic
@@ -273,7 +276,11 @@ impl CodesysClient {
         let payload_len = u32::from_le_bytes([data[12], data[13], data[14], data[15]]) as usize;
 
         if data.len() < 16 + payload_len {
-            return Err(anyhow!("Response payload truncated (expected {}, got {})", 16 + payload_len, data.len()));
+            return Err(anyhow!(
+                "Response payload truncated (expected {}, got {})",
+                16 + payload_len,
+                data.len()
+            ));
         }
 
         let payload = data[16..16 + payload_len].to_vec();
@@ -298,11 +305,16 @@ impl CodesysClient {
         conn.read_exact(&mut header).await?;
 
         // Parse header to get payload length (bytes 12-15)
-        let payload_len = u32::from_le_bytes([header[12], header[13], header[14], header[15]]) as usize;
+        let payload_len =
+            u32::from_le_bytes([header[12], header[13], header[14], header[15]]) as usize;
 
         // Validate payload length to prevent memory exhaustion
         if payload_len > MAX_PACKET_SIZE {
-            return Err(anyhow!("Payload length {} exceeds maximum {}", payload_len, MAX_PACKET_SIZE));
+            return Err(anyhow!(
+                "Payload length {} exceeds maximum {}",
+                payload_len,
+                MAX_PACKET_SIZE
+            ));
         }
 
         // Read payload
@@ -364,7 +376,8 @@ impl CodesysClient {
 
         // Parse session ID from response
         if response.len() >= 4 {
-            let session_id = u32::from_le_bytes([response[0], response[1], response[2], response[3]]);
+            let session_id =
+                u32::from_le_bytes([response[0], response[1], response[2], response[3]]);
             *self.session_id.lock().await = Some(session_id);
             debug!("Codesys login successful, session_id: {}", session_id);
         }
@@ -621,7 +634,8 @@ impl PlcProgrammer for CodesysClient {
             offset += 2;
 
             if offset + name_len <= response.len() {
-                let name = String::from_utf8_lossy(&response[offset..offset + name_len]).to_string();
+                let name =
+                    String::from_utf8_lossy(&response[offset..offset + name_len]).to_string();
                 programs.push(name);
                 offset += name_len;
             } else {

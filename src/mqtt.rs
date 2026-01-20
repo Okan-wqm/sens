@@ -361,7 +361,10 @@ impl MqttClient {
                 }
                 Ok(Event::Incoming(Packet::SubAck(suback))) => {
                     // v1.2.6: Log subscription acknowledgment with QoS
-                    info!("📋 MQTT subscription acknowledged: qos={:?}", suback.return_codes);
+                    info!(
+                        "📋 MQTT subscription acknowledged: qos={:?}",
+                        suback.return_codes
+                    );
                 }
                 Ok(Event::Incoming(Packet::PingResp)) => {
                     trace!("🏓 MQTT ping response received (connection alive)");
@@ -515,10 +518,7 @@ impl MqttClient {
         if let Some(handle) = self.event_loop_handle.take() {
             handle.abort();
             // Wait briefly for task to terminate
-            let _ = tokio::time::timeout(
-                std::time::Duration::from_millis(100),
-                handle,
-            ).await;
+            let _ = tokio::time::timeout(std::time::Duration::from_millis(100), handle).await;
         }
 
         info!("MQTT disconnected");

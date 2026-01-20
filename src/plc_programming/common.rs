@@ -2,7 +2,7 @@
 //!
 //! Shared functionality across all PLC programming implementations.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::time::Duration;
 use tokio::time::timeout;
 use tracing::{info, warn};

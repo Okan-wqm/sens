@@ -22,11 +22,11 @@
 
 use super::common::*;
 use super::{PlcProgram, PlcProgrammer, PlcRunMode, PlcStatus, UploadResult};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
@@ -362,7 +362,11 @@ impl AdsClient {
 
         // Validate length to prevent memory exhaustion
         if ams_length > MAX_AMS_PACKET_SIZE {
-            return Err(anyhow!("AMS packet too large: {} bytes (max {})", ams_length, MAX_AMS_PACKET_SIZE));
+            return Err(anyhow!(
+                "AMS packet too large: {} bytes (max {})",
+                ams_length,
+                MAX_AMS_PACKET_SIZE
+            ));
         }
 
         // Read AMS data
@@ -402,7 +406,10 @@ impl AdsClient {
 
         // Parse device name (null-terminated string at offset 8)
         let name_bytes = &response[8..];
-        let name_end = name_bytes.iter().position(|&b| b == 0).unwrap_or(name_bytes.len());
+        let name_end = name_bytes
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(name_bytes.len());
         let name = String::from_utf8_lossy(&name_bytes[..name_end]).to_string();
 
         Ok((name, version))
@@ -472,12 +479,8 @@ impl PlcProgrammer for AdsClient {
 
         let timeout_duration = std::time::Duration::from_secs(self.config.timeout_secs);
 
-        let stream = with_timeout(
-            TcpStream::connect(&addr),
-            timeout_duration,
-            "ADS connect",
-        )
-        .await?;
+        let stream =
+            with_timeout(TcpStream::connect(&addr), timeout_duration, "ADS connect").await?;
 
         *self.connection.lock().await = Some(stream);
         self.connected.store(true, Ordering::Release);
@@ -559,9 +562,7 @@ impl PlcProgrammer for AdsClient {
             } else {
                 None
             },
-            warnings: vec![
-                "Full TwinCAT compilation requires TcXaeShell".to_string(),
-            ],
+            warnings: vec!["Full TwinCAT compilation requires TcXaeShell".to_string()],
             errors,
             timestamp: chrono::Utc::now().to_rfc3339(),
             plc_response: HashMap::new(),

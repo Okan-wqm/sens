@@ -23,8 +23,7 @@ use tracing::{debug, error, info, warn};
 use crate::AppState;
 use crate::mqtt::{CommandMessage, CommandResponse, IncomingMessage};
 use crate::plc_programming::{
-    PlcProgrammer, PlcProgram,
-    CodesysClient, S7Client, OpcUaClient, EtherNetIpClient, AdsClient,
+    AdsClient, CodesysClient, EtherNetIpClient, OpcUaClient, PlcProgram, PlcProgrammer, S7Client,
 };
 use crate::scripting::{ExecutionMode, FBDefinition, ScriptDefinition, ScriptStorage};
 use crate::security::sanitize_for_log;
@@ -541,7 +540,8 @@ impl CommandHandler {
         {
             // Fire-and-forget: JoinHandle intentionally not tracked (agent restarting)
             let _ = tokio::spawn(async {
-                tokio::time::sleep(tokio::time::Duration::from_secs(DEFAULT_RESTART_DELAY_SECS)).await;
+                tokio::time::sleep(tokio::time::Duration::from_secs(DEFAULT_RESTART_DELAY_SECS))
+                    .await;
 
                 let status = std::process::Command::new("systemctl")
                     .args(["restart", "suderra-agent"])
@@ -1429,7 +1429,10 @@ impl CommandHandler {
                 return (
                     false,
                     json!(null),
-                    Some("Missing 'protocol' parameter (codesys, s7, opcua, ethernet_ip, ads)".to_string()),
+                    Some(
+                        "Missing 'protocol' parameter (codesys, s7, opcua, ethernet_ip, ads)"
+                            .to_string(),
+                    ),
                 );
             }
         };
@@ -1447,7 +1450,10 @@ impl CommandHandler {
         };
 
         // Parse program
-        let program: PlcProgram = match params.get("program").and_then(|p| serde_json::from_value(p.clone()).ok()) {
+        let program: PlcProgram = match params
+            .get("program")
+            .and_then(|p| serde_json::from_value(p.clone()).ok())
+        {
             Some(p) => p,
             None => {
                 return (
@@ -1477,12 +1483,22 @@ impl CommandHandler {
                     address: address.to_string(),
                     port: params.get("port").and_then(|v| v.as_u64()).unwrap_or(1217) as u16,
                     mode: Default::default(),
-                    device_name: params.get("device_name").and_then(|v| v.as_str()).map(String::from),
+                    device_name: params
+                        .get("device_name")
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
                     username: username.map(String::from),
                     password: password.map(String::from),
-                    encrypted: params.get("encrypted").and_then(|v| v.as_bool()).unwrap_or(false),
+                    encrypted: params
+                        .get("encrypted")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false),
                     timeout_secs: 30,
-                    application: params.get("application").and_then(|v| v.as_str()).unwrap_or("Application").to_string(),
+                    application: params
+                        .get("application")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("Application")
+                        .to_string(),
                 };
                 let mut client = CodesysClient::new(config);
                 Self::upload_with_client(&mut client, &program).await
@@ -1504,16 +1520,29 @@ impl CommandHandler {
             "opcua" => {
                 let config = crate::plc_programming::opcua::OpcUaConfig {
                     name: "remote".to_string(),
-                    endpoint_url: format!("opc.tcp://{}:{}", address, params.get("port").and_then(|v| v.as_u64()).unwrap_or(4840)),
+                    endpoint_url: format!(
+                        "opc.tcp://{}:{}",
+                        address,
+                        params.get("port").and_then(|v| v.as_u64()).unwrap_or(4840)
+                    ),
                     security_policy: Default::default(),
                     security_mode: Default::default(),
                     username: username.map(String::from),
                     password: password.map(String::from),
-                    client_cert_path: params.get("client_cert_path").and_then(|v| v.as_str()).map(String::from),
-                    client_key_path: params.get("client_key_path").and_then(|v| v.as_str()).map(String::from),
+                    client_cert_path: params
+                        .get("client_cert_path")
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
+                    client_key_path: params
+                        .get("client_key_path")
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
                     timeout_secs: 30,
                     session_timeout_ms: 30000,
-                    program_namespace: params.get("program_namespace").and_then(|v| v.as_str()).map(String::from),
+                    program_namespace: params
+                        .get("program_namespace")
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
                 };
                 let mut client = OpcUaClient::new(config);
                 Self::upload_with_client(&mut client, &program).await
@@ -1524,7 +1553,10 @@ impl CommandHandler {
                     address: address.to_string(),
                     port: params.get("port").and_then(|v| v.as_u64()).unwrap_or(44818) as u16,
                     slot: params.get("slot").and_then(|v| v.as_u64()).unwrap_or(0) as u8,
-                    connection_path: params.get("connection_path").and_then(|v| v.as_str()).map(String::from),
+                    connection_path: params
+                        .get("connection_path")
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
                     timeout_secs: 30,
                     plc_type: Default::default(),
                 };
@@ -1547,8 +1579,14 @@ impl CommandHandler {
                     address: address.to_string(),
                     port: params.get("port").and_then(|v| v.as_u64()).unwrap_or(48898) as u16,
                     target_ams_net_id: ams_net_id,
-                    target_ams_port: params.get("target_ams_port").and_then(|v| v.as_u64()).unwrap_or(851) as u16,
-                    source_ams_net_id: params.get("source_ams_net_id").and_then(|v| v.as_str()).map(String::from),
+                    target_ams_port: params
+                        .get("target_ams_port")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(851) as u16,
+                    source_ams_net_id: params
+                        .get("source_ams_net_id")
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
                     source_ams_port: 32768,
                     timeout_secs: 30,
                     twincat_version: Default::default(),
@@ -1562,7 +1600,10 @@ impl CommandHandler {
                 return (
                     false,
                     json!(null),
-                    Some(format!("Unknown protocol: {}. Supported: codesys, s7, opcua, ethernet_ip, ads", protocol)),
+                    Some(format!(
+                        "Unknown protocol: {}. Supported: codesys, s7, opcua, ethernet_ip, ads",
+                        protocol
+                    )),
                 );
             }
         };
@@ -1677,7 +1718,11 @@ impl CommandHandler {
             "opcua" => {
                 let config = crate::plc_programming::opcua::OpcUaConfig {
                     name: "remote".to_string(),
-                    endpoint_url: format!("opc.tcp://{}:{}", address, params.get("port").and_then(|v| v.as_u64()).unwrap_or(4840)),
+                    endpoint_url: format!(
+                        "opc.tcp://{}:{}",
+                        address,
+                        params.get("port").and_then(|v| v.as_u64()).unwrap_or(4840)
+                    ),
                     security_policy: Default::default(),
                     security_mode: Default::default(),
                     username: None,
@@ -1753,7 +1798,11 @@ impl CommandHandler {
                 }),
                 None,
             ),
-            Err(e) => (false, json!(null), Some(format!("Status check failed: {}", e))),
+            Err(e) => (
+                false,
+                json!(null),
+                Some(format!("Status check failed: {}", e)),
+            ),
         }
     }
 
@@ -1780,18 +1829,30 @@ impl CommandHandler {
     }
 
     /// Helper for start/stop commands
-    async fn plc_run_stop_helper(&self, params: &Value, start: bool) -> (bool, Value, Option<String>) {
+    async fn plc_run_stop_helper(
+        &self,
+        params: &Value,
+        start: bool,
+    ) -> (bool, Value, Option<String>) {
         let protocol = match params.get("protocol").and_then(|v| v.as_str()) {
             Some(p) => p,
             None => {
-                return (false, json!(null), Some("Missing 'protocol' parameter".to_string()));
+                return (
+                    false,
+                    json!(null),
+                    Some("Missing 'protocol' parameter".to_string()),
+                );
             }
         };
 
         let address = match params.get("address").and_then(|v| v.as_str()) {
             Some(a) => a,
             None => {
-                return (false, json!(null), Some("Missing 'address' parameter".to_string()));
+                return (
+                    false,
+                    json!(null),
+                    Some("Missing 'address' parameter".to_string()),
+                );
             }
         };
 
@@ -1839,7 +1900,10 @@ impl CommandHandler {
                 return (
                     false,
                     json!(null),
-                    Some(format!("Start/Stop not supported for protocol: {}", protocol)),
+                    Some(format!(
+                        "Start/Stop not supported for protocol: {}",
+                        protocol
+                    )),
                 );
             }
         };
@@ -1852,7 +1916,11 @@ impl CommandHandler {
             }
             Err(e) => {
                 let action = if start { "start" } else { "stop" };
-                (false, json!(null), Some(format!("PLC {} failed: {}", action, e)))
+                (
+                    false,
+                    json!(null),
+                    Some(format!("PLC {} failed: {}", action, e)),
+                )
             }
         }
     }
@@ -1880,14 +1948,22 @@ impl CommandHandler {
         let protocol = match params.get("protocol").and_then(|v| v.as_str()) {
             Some(p) => p,
             None => {
-                return (false, json!(null), Some("Missing 'protocol' parameter".to_string()));
+                return (
+                    false,
+                    json!(null),
+                    Some("Missing 'protocol' parameter".to_string()),
+                );
             }
         };
 
         let address = match params.get("address").and_then(|v| v.as_str()) {
             Some(a) => a,
             None => {
-                return (false, json!(null), Some("Missing 'address' parameter".to_string()));
+                return (
+                    false,
+                    json!(null),
+                    Some("Missing 'address' parameter".to_string()),
+                );
             }
         };
 
@@ -1956,21 +2032,33 @@ impl CommandHandler {
         let protocol = match params.get("protocol").and_then(|v| v.as_str()) {
             Some(p) => p,
             None => {
-                return (false, json!(null), Some("Missing 'protocol' parameter".to_string()));
+                return (
+                    false,
+                    json!(null),
+                    Some("Missing 'protocol' parameter".to_string()),
+                );
             }
         };
 
         let address = match params.get("address").and_then(|v| v.as_str()) {
             Some(a) => a,
             None => {
-                return (false, json!(null), Some("Missing 'address' parameter".to_string()));
+                return (
+                    false,
+                    json!(null),
+                    Some("Missing 'address' parameter".to_string()),
+                );
             }
         };
 
         let program_name = match params.get("program_name").and_then(|v| v.as_str()) {
             Some(n) => n,
             None => {
-                return (false, json!(null), Some("Missing 'program_name' parameter".to_string()));
+                return (
+                    false,
+                    json!(null),
+                    Some("Missing 'program_name' parameter".to_string()),
+                );
             }
         };
 
@@ -2034,21 +2122,33 @@ impl CommandHandler {
         let protocol = match params.get("protocol").and_then(|v| v.as_str()) {
             Some(p) => p,
             None => {
-                return (false, json!(null), Some("Missing 'protocol' parameter".to_string()));
+                return (
+                    false,
+                    json!(null),
+                    Some("Missing 'protocol' parameter".to_string()),
+                );
             }
         };
 
         let address = match params.get("address").and_then(|v| v.as_str()) {
             Some(a) => a,
             None => {
-                return (false, json!(null), Some("Missing 'address' parameter".to_string()));
+                return (
+                    false,
+                    json!(null),
+                    Some("Missing 'address' parameter".to_string()),
+                );
             }
         };
 
         let program_name = match params.get("program_name").and_then(|v| v.as_str()) {
             Some(n) => n,
             None => {
-                return (false, json!(null), Some("Missing 'program_name' parameter".to_string()));
+                return (
+                    false,
+                    json!(null),
+                    Some("Missing 'program_name' parameter".to_string()),
+                );
             }
         };
 
@@ -2079,7 +2179,11 @@ impl CommandHandler {
         match result {
             Ok(()) => {
                 info!(program = %program_name, "Program deleted from PLC");
-                (true, json!({"deleted": true, "program_name": program_name}), None)
+                (
+                    true,
+                    json!({"deleted": true, "program_name": program_name}),
+                    None,
+                )
             }
             Err(e) => (false, json!(null), Some(format!("Delete failed: {}", e))),
         }

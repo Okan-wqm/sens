@@ -22,22 +22,22 @@
 //!
 //! ## v1.3.0 Feature
 
-pub mod codesys;
-pub mod s7comm;
-pub mod opcua;
-pub mod ethernet_ip;
 pub mod ads;
+pub mod codesys;
 pub mod common;
+pub mod ethernet_ip;
+pub mod opcua;
+pub mod s7comm;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub use codesys::CodesysClient;
-pub use s7comm::S7Client;
-pub use opcua::OpcUaClient;
-pub use ethernet_ip::EtherNetIpClient;
 pub use ads::AdsClient;
+pub use codesys::CodesysClient;
+pub use ethernet_ip::EtherNetIpClient;
+pub use opcua::OpcUaClient;
+pub use s7comm::S7Client;
 
 // ============================================================================
 // Common Types
@@ -130,12 +130,12 @@ pub enum PlcDataType {
     Lreal,
     Time,
     Date,
-    Tod,      // Time of Day
-    Dt,       // Date and Time
+    Tod, // Time of Day
+    Dt,  // Date and Time
     String,
     Wstring,
     Array(Box<PlcDataType>, usize), // Array with element type and size
-    Struct(String),                  // User-defined struct name
+    Struct(String),                 // User-defined struct name
 }
 
 impl Default for PlcDataType {
@@ -334,18 +334,17 @@ mod tests {
                 END_VAR
 
                 counter := counter + 1;
-            "#.to_string(),
-            variables: vec![
-                PlcVariable {
-                    name: "counter".to_string(),
-                    data_type: PlcDataType::Int,
-                    initial_value: Some("0".to_string()),
-                    address: None,
-                    scope: VariableScope::Local,
-                    retain: false,
-                    description: "Test counter".to_string(),
-                }
-            ],
+            "#
+            .to_string(),
+            variables: vec![PlcVariable {
+                name: "counter".to_string(),
+                data_type: PlcDataType::Int,
+                initial_value: Some("0".to_string()),
+                address: None,
+                scope: VariableScope::Local,
+                retain: false,
+                description: "Test counter".to_string(),
+            }],
             function_blocks: vec![],
             metadata: HashMap::new(),
         };

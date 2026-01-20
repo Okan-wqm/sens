@@ -20,11 +20,11 @@
 
 use super::common::*;
 use super::{PlcProgram, PlcProgrammer, PlcRunMode, PlcStatus, UploadResult};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
@@ -270,12 +270,8 @@ impl EtherNetIpClient {
         // Item count: 2 (null address + unconnected data)
         let item_data_len = 2 + 2 + 2 + cip_data.len(); // type + len for each item + data
 
-        let mut msg = self.build_enip_header(
-            ENIP_SEND_RR_DATA,
-            session,
-            context,
-            6 + item_data_len,
-        );
+        let mut msg =
+            self.build_enip_header(ENIP_SEND_RR_DATA, session, context, 6 + item_data_len);
 
         // Interface handle
         msg.extend_from_slice(&0u32.to_le_bytes());
@@ -317,7 +313,11 @@ impl EtherNetIpClient {
 
         // Validate data length to prevent memory exhaustion (IEC 62443 SL2)
         if data_len > MAX_ENIP_PACKET_SIZE {
-            return Err(anyhow!("EtherNet/IP packet too large: {} bytes (max {})", data_len, MAX_ENIP_PACKET_SIZE));
+            return Err(anyhow!(
+                "EtherNet/IP packet too large: {} bytes (max {})",
+                data_len,
+                MAX_ENIP_PACKET_SIZE
+            ));
         }
 
         // Read data

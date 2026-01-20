@@ -364,7 +364,10 @@ impl OfflineQueue {
             let mut eviction_rounds = 0;
             const MAX_EVICTION_ROUNDS: usize = 10; // Prevent infinite loop
 
-            while db_size >= self.max_disk_bytes && current_size > 0 && eviction_rounds < MAX_EVICTION_ROUNDS {
+            while db_size >= self.max_disk_bytes
+                && current_size > 0
+                && eviction_rounds < MAX_EVICTION_ROUNDS
+            {
                 // Evict 10% of messages (min 5, max 50) to reclaim disk space
                 let evict_count = (current_size / 10).max(5).min(50);
                 self.evict_for_disk_space(&conn, evict_count)?;
@@ -785,10 +788,7 @@ impl OfflineQueue {
             || backup_path.contains(';')
             || backup_path.contains("--")
         {
-            anyhow::bail!(
-                "Backup path contains invalid characters: {}",
-                backup_path
-            );
+            anyhow::bail!("Backup path contains invalid characters: {}", backup_path);
         }
 
         let conn = self

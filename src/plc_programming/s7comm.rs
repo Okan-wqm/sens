@@ -20,11 +20,11 @@
 
 use super::common::*;
 use super::{PlcProgram, PlcProgrammer, PlcRunMode, PlcStatus, UploadResult};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
@@ -241,9 +241,9 @@ impl S7Client {
     /// Build TPKT header (RFC 1006)
     fn build_tpkt(payload_len: usize) -> Vec<u8> {
         vec![
-            0x03,                            // Version
-            0x00,                            // Reserved
-            ((payload_len + 4) >> 8) as u8,  // Length high
+            0x03,                             // Version
+            0x00,                             // Reserved
+            ((payload_len + 4) >> 8) as u8,   // Length high
             ((payload_len + 4) & 0xFF) as u8, // Length low
         ]
     }
@@ -255,7 +255,7 @@ impl S7Client {
             COTP_CR, // PDU type: Connection Request
             0x00, 0x00, // Destination reference
             0x00, 0x01, // Source reference
-            0x00,    // Class & options
+            0x00, // Class & options
             // Parameters
             0xC0, 0x01, 0x0A, // TPDU size (1024)
             0xC1, 0x02, // Source TSAP
@@ -280,17 +280,22 @@ impl S7Client {
         let pdu_ref = self.next_pdu_ref().await;
 
         vec![
-            S7_PROTOCOL_ID,                      // Protocol ID
-            S7_JOB,                              // Message type: Job
-            0x00, 0x00,                          // Reserved
-            (pdu_ref >> 8) as u8,                // PDU reference high
-            (pdu_ref & 0xFF) as u8,              // PDU reference low
-            0x00, 0x08,                          // Parameter length (8)
-            0x00, 0x00,                          // Data length (0)
-            S7_FUNC_SETUP_COMM,                  // Function: Setup communication
-            0x00,                                // Reserved
-            0x00, 0x01,                          // Max AmQ calling
-            0x00, 0x01,                          // Max AmQ called
+            S7_PROTOCOL_ID, // Protocol ID
+            S7_JOB,         // Message type: Job
+            0x00,
+            0x00,                   // Reserved
+            (pdu_ref >> 8) as u8,   // PDU reference high
+            (pdu_ref & 0xFF) as u8, // PDU reference low
+            0x00,
+            0x08, // Parameter length (8)
+            0x00,
+            0x00,               // Data length (0)
+            S7_FUNC_SETUP_COMM, // Function: Setup communication
+            0x00,               // Reserved
+            0x00,
+            0x01, // Max AmQ calling
+            0x00,
+            0x01,                                // Max AmQ called
             (self.config.pdu_size >> 8) as u8,   // PDU size high
             (self.config.pdu_size & 0xFF) as u8, // PDU size low
         ]
@@ -332,10 +337,17 @@ impl S7Client {
 
         let total_length = ((tpkt_header[2] as usize) << 8) | (tpkt_header[3] as usize);
         if total_length < 4 {
-            return Err(anyhow!("Invalid TPKT length: {} (minimum is 4)", total_length));
+            return Err(anyhow!(
+                "Invalid TPKT length: {} (minimum is 4)",
+                total_length
+            ));
         }
         if total_length > MAX_S7_PACKET_SIZE {
-            return Err(anyhow!("TPKT packet too large: {} bytes (max {})", total_length, MAX_S7_PACKET_SIZE));
+            return Err(anyhow!(
+                "TPKT packet too large: {} bytes (max {})",
+                total_length,
+                MAX_S7_PACKET_SIZE
+            ));
         }
         let length = total_length - 4;
         let mut response = vec![0u8; length];
@@ -377,8 +389,7 @@ impl S7Client {
         if s7_response[1] == S7_ACK_DATA {
             // Extract negotiated PDU size
             if s7_response.len() >= 18 {
-                let pdu_size =
-                    (s7_response[16] as u16) << 8 | s7_response[17] as u16;
+                let pdu_size = (s7_response[16] as u16) << 8 | s7_response[17] as u16;
                 *self.negotiated_pdu.lock().await = pdu_size;
                 debug!("Negotiated PDU size: {}", pdu_size);
             }
@@ -394,19 +405,16 @@ impl S7Client {
         let pdu_ref = self.next_pdu_ref().await;
 
         // Block filename format: _0A00001P (OB1 in passive file system)
-        let block_name = format!(
-            "_0{}{:05}P",
-            (block_type as u8) as char,
-            block_num
-        );
+        let block_name = format!("_0{}{:05}P", (block_type as u8) as char, block_num);
         let block_bytes = block_name.as_bytes();
 
         let mut s7_data = vec![
-            S7_PROTOCOL_ID,               // Protocol ID
-            S7_JOB,                       // Message type: Job
-            0x00, 0x00,                   // Reserved
-            (pdu_ref >> 8) as u8,         // PDU reference high
-            (pdu_ref & 0xFF) as u8,       // PDU reference low
+            S7_PROTOCOL_ID, // Protocol ID
+            S7_JOB,         // Message type: Job
+            0x00,
+            0x00,                   // Reserved
+            (pdu_ref >> 8) as u8,   // PDU reference high
+            (pdu_ref & 0xFF) as u8, // PDU reference low
         ];
 
         // Parameter length and data length will be filled later
@@ -440,13 +448,20 @@ impl S7Client {
         let mut request = vec![
             S7_PROTOCOL_ID,
             S7_JOB,
-            0x00, 0x00,
+            0x00,
+            0x00,
             (pdu_ref >> 8) as u8,
             (pdu_ref & 0xFF) as u8,
-            0x00, (param.len() + 9) as u8, // Parameter length
-            0x00, 0x00,                     // Data length
+            0x00,
+            (param.len() + 9) as u8, // Parameter length
+            0x00,
+            0x00, // Data length
             func,
-            0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
             0xFD,
             0x00,
             param.len() as u8,
@@ -511,12 +526,8 @@ impl PlcProgrammer for S7Client {
 
         let timeout_duration = std::time::Duration::from_secs(self.config.timeout_secs);
 
-        let stream = with_timeout(
-            TcpStream::connect(&addr),
-            timeout_duration,
-            "S7 connect",
-        )
-        .await?;
+        let stream =
+            with_timeout(TcpStream::connect(&addr), timeout_duration, "S7 connect").await?;
 
         *self.connection.lock().await = Some(stream);
 
@@ -597,9 +608,7 @@ impl PlcProgrammer for S7Client {
             } else {
                 None
             },
-            warnings: vec![
-                "Full ST compilation requires TIA Portal Openness API".to_string()
-            ],
+            warnings: vec!["Full ST compilation requires TIA Portal Openness API".to_string()],
             errors,
             timestamp: chrono::Utc::now().to_rfc3339(),
             plc_response: HashMap::new(),
@@ -694,7 +703,7 @@ impl PlcProgrammer for S7Client {
             success: true,
             program_id: None,
             warnings: vec![
-                "MC7 compilation is simplified - full compilation requires TIA Portal".to_string()
+                "MC7 compilation is simplified - full compilation requires TIA Portal".to_string(),
             ],
             errors: Vec::new(),
             timestamp: chrono::Utc::now().to_rfc3339(),

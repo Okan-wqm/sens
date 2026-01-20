@@ -113,7 +113,10 @@ impl TriggerManager {
             let state = match self.states.get(&state_key) {
                 Some(s) => s,
                 None => {
-                    error!("Trigger state missing for '{}' - this should never happen", state_key);
+                    error!(
+                        "Trigger state missing for '{}' - this should never happen",
+                        state_key
+                    );
                     return false;
                 }
             };
@@ -130,43 +133,35 @@ impl TriggerManager {
         // Evaluate trigger type
         // v1.2.6: Use match with error handling instead of unwrap() to prevent panic
         let should_trigger = match trigger.trigger_type {
-            TriggerType::Threshold => {
-                match self.states.get_mut(&state_key) {
-                    Some(state) => Self::check_threshold_static(trigger, context, state),
-                    None => {
-                        error!("Trigger state missing for Threshold '{}'", state_key);
-                        false
-                    }
+            TriggerType::Threshold => match self.states.get_mut(&state_key) {
+                Some(state) => Self::check_threshold_static(trigger, context, state),
+                None => {
+                    error!("Trigger state missing for Threshold '{}'", state_key);
+                    false
                 }
-            }
-            TriggerType::Change => {
-                match self.states.get_mut(&state_key) {
-                    Some(state) => Self::check_change_static(trigger, context, state),
-                    None => {
-                        error!("Trigger state missing for Change '{}'", state_key);
-                        false
-                    }
+            },
+            TriggerType::Change => match self.states.get_mut(&state_key) {
+                Some(state) => Self::check_change_static(trigger, context, state),
+                None => {
+                    error!("Trigger state missing for Change '{}'", state_key);
+                    false
                 }
-            }
+            },
             TriggerType::Schedule => Self::check_schedule_static(trigger),
-            TriggerType::Interval => {
-                match self.states.get(&state_key) {
-                    Some(state) => Self::check_interval_static(trigger, state, now_ms),
-                    None => {
-                        error!("Trigger state missing for Interval '{}'", state_key);
-                        false
-                    }
+            TriggerType::Interval => match self.states.get(&state_key) {
+                Some(state) => Self::check_interval_static(trigger, state, now_ms),
+                None => {
+                    error!("Trigger state missing for Interval '{}'", state_key);
+                    false
                 }
-            }
-            TriggerType::GpioChange => {
-                match self.states.get_mut(&state_key) {
-                    Some(state) => Self::check_gpio_change_static(trigger, context, state),
-                    None => {
-                        error!("Trigger state missing for GpioChange '{}'", state_key);
-                        false
-                    }
+            },
+            TriggerType::GpioChange => match self.states.get_mut(&state_key) {
+                Some(state) => Self::check_gpio_change_static(trigger, context, state),
+                None => {
+                    error!("Trigger state missing for GpioChange '{}'", state_key);
+                    false
                 }
-            }
+            },
             TriggerType::Manual => false,  // Only triggered via command
             TriggerType::Startup => false, // Handled separately on startup
         };
@@ -252,7 +247,8 @@ impl TriggerManager {
         if parts.len() < 5 {
             warn!(
                 "Invalid cron expression '{}': expected 5 fields (minute hour day month weekday), got {}",
-                cron, parts.len()
+                cron,
+                parts.len()
             );
             return false;
         }
@@ -386,10 +382,7 @@ impl TriggerManager {
                             let max = arr[1].as_f64().unwrap_or(f64::MAX);
                             // v1.2.6: Validate min <= max
                             if min > max {
-                                warn!(
-                                    "Invalid 'between' range: min ({}) > max ({})",
-                                    min, max
-                                );
+                                warn!("Invalid 'between' range: min ({}) > max ({})", min, max);
                                 return false;
                             }
                             return l >= min && l <= max;

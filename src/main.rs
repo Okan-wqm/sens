@@ -657,9 +657,7 @@ async fn run_agent(
             // Partial configuration detected - this is an invalid state
             warn!(
                 "MQTT config incomplete: username={}, password={}, broker={}. Treating as not activated.",
-                !missing_username,
-                !missing_password,
-                !missing_broker
+                !missing_username, !missing_password, !missing_broker
             );
         }
 
@@ -718,7 +716,12 @@ async fn run_agent(
                     break;
                 }
                 Err(e) => {
-                    error!("Activation attempt {}/{} failed: {}", attempt + 1, MAX_ACTIVATION_RETRIES, e);
+                    error!(
+                        "Activation attempt {}/{} failed: {}",
+                        attempt + 1,
+                        MAX_ACTIVATION_RETRIES,
+                        e
+                    );
                     last_error = Some(e);
                 }
             }

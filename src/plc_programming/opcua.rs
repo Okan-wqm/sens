@@ -21,11 +21,11 @@
 
 use super::common::*;
 use super::{PlcProgram, PlcProgrammer, PlcRunMode, PlcStatus, UploadResult};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
@@ -177,10 +177,10 @@ impl Default for OpcUaConfig {
 /// OPC UA Node ID types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum NodeId {
-    Numeric(u16, u32),       // (namespace, identifier)
-    String(u16, String),     // (namespace, identifier)
-    Guid(u16, [u8; 16]),     // (namespace, identifier)
-    Opaque(u16, Vec<u8>),    // (namespace, identifier)
+    Numeric(u16, u32),    // (namespace, identifier)
+    String(u16, String),  // (namespace, identifier)
+    Guid(u16, [u8; 16]),  // (namespace, identifier)
+    Opaque(u16, Vec<u8>), // (namespace, identifier)
 }
 
 impl NodeId {
@@ -422,10 +422,17 @@ impl OpcUaClient {
 
         // Validate message size
         if size < 8 {
-            return Err(anyhow!("Invalid OPC UA message size: {} (minimum is 8)", size));
+            return Err(anyhow!(
+                "Invalid OPC UA message size: {} (minimum is 8)",
+                size
+            ));
         }
         if size > MAX_OPCUA_MESSAGE_SIZE {
-            return Err(anyhow!("OPC UA message too large: {} bytes (max {})", size, MAX_OPCUA_MESSAGE_SIZE));
+            return Err(anyhow!(
+                "OPC UA message too large: {} bytes (max {})",
+                size,
+                MAX_OPCUA_MESSAGE_SIZE
+            ));
         }
 
         // Read rest of message
@@ -531,7 +538,10 @@ impl PlcProgrammer for OpcUaClient {
 
         // Check for ACK
         if response.len() < 3 {
-            return Err(anyhow!("OPC UA Hello response too short ({} bytes)", response.len()));
+            return Err(anyhow!(
+                "OPC UA Hello response too short ({} bytes)",
+                response.len()
+            ));
         }
         if &response[0..3] != MSG_ACK {
             return Err(anyhow!("OPC UA Hello rejected"));
@@ -545,7 +555,8 @@ impl PlcProgrammer for OpcUaClient {
         // Parse secure channel response
         // Need at least 12 bytes to access indices [8..11] for channel_id
         if response.len() >= 12 {
-            let channel_id = u32::from_le_bytes([response[8], response[9], response[10], response[11]]);
+            let channel_id =
+                u32::from_le_bytes([response[8], response[9], response[10], response[11]]);
             *self.secure_channel_id.lock().await = channel_id;
             debug!("OPC UA Secure channel opened: {}", channel_id);
         }
@@ -717,10 +728,7 @@ mod tests {
 
     #[test]
     fn test_security_policy_uri() {
-        assert_eq!(
-            OpcUaSecurityPolicy::None.to_uri(),
-            SECURITY_POLICY_NONE
-        );
+        assert_eq!(OpcUaSecurityPolicy::None.to_uri(), SECURITY_POLICY_NONE);
         assert_eq!(
             OpcUaSecurityPolicy::Basic256Sha256.to_uri(),
             SECURITY_POLICY_BASIC256SHA256

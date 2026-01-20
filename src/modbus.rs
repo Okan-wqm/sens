@@ -743,7 +743,9 @@ impl ModbusClient {
                     // v1.2.6: Log successful register reads at debug level
                     debug!(
                         "📊 Modbus READ: device='{}', register='{}', value={:.4} {}",
-                        self.config.name, register.name, value.scaled_value,
+                        self.config.name,
+                        register.name,
+                        value.scaled_value,
                         value.unit.as_deref().unwrap_or("")
                     );
                     result.values.push(value);
@@ -755,7 +757,9 @@ impl ModbusClient {
                     if result.errors.len() < MAX_ERRORS_PER_READ {
                         result.errors.push(format!("{}: {}", register.name, e));
                     } else if result.errors.len() == MAX_ERRORS_PER_READ {
-                        result.errors.push("[Additional errors truncated]".to_string());
+                        result
+                            .errors
+                            .push("[Additional errors truncated]".to_string());
                     }
                     had_failure = true;
                 }
@@ -1203,7 +1207,10 @@ impl ModbusManager {
     /// uses busy-waiting which wastes CPU cycles. The async version properly
     /// yields to the scheduler.
     #[allow(dead_code)]
-    #[deprecated(since = "1.3.2", note = "Use get_client_by_name() async version instead")]
+    #[deprecated(
+        since = "1.3.2",
+        note = "Use get_client_by_name() async version instead"
+    )]
     pub fn get_client(&self, name: &str) -> Option<Arc<Mutex<ModbusClient>>> {
         // v1.2.3: Retry multiple times if locks are contested
         // v1.3.2: Note - spin_loop() doesn't actually yield to async runtime
