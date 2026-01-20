@@ -101,6 +101,170 @@ const TYPE_ID_CALL_REQUEST: u32 = 712;
 const TYPE_ID_CALL_RESPONSE: u32 = 715;
 
 // ============================================================================
+// Discovery Service Type IDs
+// ============================================================================
+
+/// FindServersRequest Type ID
+const TYPE_ID_FIND_SERVERS_REQUEST: u32 = 420;
+/// FindServersResponse Type ID
+const TYPE_ID_FIND_SERVERS_RESPONSE: u32 = 423;
+/// GetEndpointsRequest Type ID
+const TYPE_ID_GET_ENDPOINTS_REQUEST: u32 = 426;
+/// GetEndpointsResponse Type ID
+const TYPE_ID_GET_ENDPOINTS_RESPONSE: u32 = 429;
+/// RegisterServerRequest Type ID
+const TYPE_ID_REGISTER_SERVER_REQUEST: u32 = 437;
+/// RegisterServerResponse Type ID
+const TYPE_ID_REGISTER_SERVER_RESPONSE: u32 = 440;
+/// FindServersOnNetworkRequest Type ID
+const TYPE_ID_FIND_SERVERS_ON_NETWORK_REQUEST: u32 = 12190;
+/// FindServersOnNetworkResponse Type ID
+const TYPE_ID_FIND_SERVERS_ON_NETWORK_RESPONSE: u32 = 12191;
+/// RegisterServer2Request Type ID
+const TYPE_ID_REGISTER_SERVER2_REQUEST: u32 = 12193;
+/// RegisterServer2Response Type ID
+const TYPE_ID_REGISTER_SERVER2_RESPONSE: u32 = 12194;
+
+// ============================================================================
+// Session Service Type IDs (additional)
+// ============================================================================
+
+/// CloseSessionRequest Type ID
+const TYPE_ID_CLOSE_SESSION_REQUEST: u32 = 473;
+/// CloseSessionResponse Type ID
+const TYPE_ID_CLOSE_SESSION_RESPONSE: u32 = 476;
+/// CancelRequest Type ID
+const TYPE_ID_CANCEL_REQUEST: u32 = 479;
+/// CancelResponse Type ID
+const TYPE_ID_CANCEL_RESPONSE: u32 = 482;
+
+// ============================================================================
+// View Service Type IDs (additional)
+// ============================================================================
+
+/// BrowseNextRequest Type ID
+const TYPE_ID_BROWSE_NEXT_REQUEST: u32 = 531;
+/// BrowseNextResponse Type ID
+const TYPE_ID_BROWSE_NEXT_RESPONSE: u32 = 534;
+/// TranslateBrowsePathsToNodeIdsRequest Type ID
+const TYPE_ID_TRANSLATE_BROWSE_PATHS_REQUEST: u32 = 552;
+/// TranslateBrowsePathsToNodeIdsResponse Type ID
+const TYPE_ID_TRANSLATE_BROWSE_PATHS_RESPONSE: u32 = 555;
+/// RegisterNodesRequest Type ID
+const TYPE_ID_REGISTER_NODES_REQUEST: u32 = 558;
+/// RegisterNodesResponse Type ID
+const TYPE_ID_REGISTER_NODES_RESPONSE: u32 = 561;
+/// UnregisterNodesRequest Type ID
+const TYPE_ID_UNREGISTER_NODES_REQUEST: u32 = 564;
+/// UnregisterNodesResponse Type ID
+const TYPE_ID_UNREGISTER_NODES_RESPONSE: u32 = 567;
+
+// ============================================================================
+// Attribute Service Type IDs (additional)
+// ============================================================================
+
+/// HistoryReadRequest Type ID
+const TYPE_ID_HISTORY_READ_REQUEST: u32 = 664;
+/// HistoryReadResponse Type ID
+const TYPE_ID_HISTORY_READ_RESPONSE: u32 = 667;
+/// HistoryUpdateRequest Type ID
+const TYPE_ID_HISTORY_UPDATE_REQUEST: u32 = 700;
+/// HistoryUpdateResponse Type ID
+const TYPE_ID_HISTORY_UPDATE_RESPONSE: u32 = 703;
+
+// ============================================================================
+// NodeManagement Service Type IDs
+// ============================================================================
+
+/// AddNodesRequest Type ID
+const TYPE_ID_ADD_NODES_REQUEST: u32 = 486;
+/// AddNodesResponse Type ID
+const TYPE_ID_ADD_NODES_RESPONSE: u32 = 489;
+/// AddReferencesRequest Type ID
+const TYPE_ID_ADD_REFERENCES_REQUEST: u32 = 492;
+/// AddReferencesResponse Type ID
+const TYPE_ID_ADD_REFERENCES_RESPONSE: u32 = 495;
+/// DeleteNodesRequest Type ID
+const TYPE_ID_DELETE_NODES_REQUEST: u32 = 498;
+/// DeleteNodesResponse Type ID
+const TYPE_ID_DELETE_NODES_RESPONSE: u32 = 501;
+/// DeleteReferencesRequest Type ID
+const TYPE_ID_DELETE_REFERENCES_REQUEST: u32 = 504;
+/// DeleteReferencesResponse Type ID
+const TYPE_ID_DELETE_REFERENCES_RESPONSE: u32 = 507;
+
+// ============================================================================
+// Query Service Type IDs
+// ============================================================================
+
+/// QueryFirstRequest Type ID
+const TYPE_ID_QUERY_FIRST_REQUEST: u32 = 615;
+/// QueryFirstResponse Type ID
+const TYPE_ID_QUERY_FIRST_RESPONSE: u32 = 618;
+/// QueryNextRequest Type ID
+const TYPE_ID_QUERY_NEXT_REQUEST: u32 = 621;
+/// QueryNextResponse Type ID
+const TYPE_ID_QUERY_NEXT_RESPONSE: u32 = 624;
+
+// ============================================================================
+// MonitoredItem Service Type IDs
+// ============================================================================
+
+/// CreateMonitoredItemsRequest Type ID
+const TYPE_ID_CREATE_MONITORED_ITEMS_REQUEST: u32 = 751;
+/// CreateMonitoredItemsResponse Type ID
+const TYPE_ID_CREATE_MONITORED_ITEMS_RESPONSE: u32 = 754;
+/// ModifyMonitoredItemsRequest Type ID
+const TYPE_ID_MODIFY_MONITORED_ITEMS_REQUEST: u32 = 763;
+/// ModifyMonitoredItemsResponse Type ID
+const TYPE_ID_MODIFY_MONITORED_ITEMS_RESPONSE: u32 = 766;
+/// SetMonitoringModeRequest Type ID
+const TYPE_ID_SET_MONITORING_MODE_REQUEST: u32 = 769;
+/// SetMonitoringModeResponse Type ID
+const TYPE_ID_SET_MONITORING_MODE_RESPONSE: u32 = 772;
+/// SetTriggeringRequest Type ID
+const TYPE_ID_SET_TRIGGERING_REQUEST: u32 = 775;
+/// SetTriggeringResponse Type ID
+const TYPE_ID_SET_TRIGGERING_RESPONSE: u32 = 778;
+/// DeleteMonitoredItemsRequest Type ID
+const TYPE_ID_DELETE_MONITORED_ITEMS_REQUEST: u32 = 781;
+/// DeleteMonitoredItemsResponse Type ID
+const TYPE_ID_DELETE_MONITORED_ITEMS_RESPONSE: u32 = 784;
+
+// ============================================================================
+// Subscription Service Type IDs
+// ============================================================================
+
+/// CreateSubscriptionRequest Type ID
+const TYPE_ID_CREATE_SUBSCRIPTION_REQUEST: u32 = 787;
+/// CreateSubscriptionResponse Type ID
+const TYPE_ID_CREATE_SUBSCRIPTION_RESPONSE: u32 = 790;
+/// ModifySubscriptionRequest Type ID
+const TYPE_ID_MODIFY_SUBSCRIPTION_REQUEST: u32 = 793;
+/// ModifySubscriptionResponse Type ID
+const TYPE_ID_MODIFY_SUBSCRIPTION_RESPONSE: u32 = 796;
+/// SetPublishingModeRequest Type ID
+const TYPE_ID_SET_PUBLISHING_MODE_REQUEST: u32 = 799;
+/// SetPublishingModeResponse Type ID
+const TYPE_ID_SET_PUBLISHING_MODE_RESPONSE: u32 = 802;
+/// PublishRequest Type ID
+const TYPE_ID_PUBLISH_REQUEST: u32 = 826;
+/// PublishResponse Type ID
+const TYPE_ID_PUBLISH_RESPONSE: u32 = 829;
+/// RepublishRequest Type ID
+const TYPE_ID_REPUBLISH_REQUEST: u32 = 832;
+/// RepublishResponse Type ID
+const TYPE_ID_REPUBLISH_RESPONSE: u32 = 835;
+/// TransferSubscriptionsRequest Type ID
+const TYPE_ID_TRANSFER_SUBSCRIPTIONS_REQUEST: u32 = 841;
+/// TransferSubscriptionsResponse Type ID
+const TYPE_ID_TRANSFER_SUBSCRIPTIONS_RESPONSE: u32 = 844;
+/// DeleteSubscriptionsRequest Type ID
+const TYPE_ID_DELETE_SUBSCRIPTIONS_REQUEST: u32 = 847;
+/// DeleteSubscriptionsResponse Type ID
+const TYPE_ID_DELETE_SUBSCRIPTIONS_RESPONSE: u32 = 850;
+
+// ============================================================================
 // OPC UA Well-Known Node IDs (from OPC UA Specification Part 5)
 // ============================================================================
 
