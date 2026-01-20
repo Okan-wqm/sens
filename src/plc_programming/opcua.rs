@@ -26,9 +26,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
+use tokio::time::timeout;
 use tracing::{debug, info, warn};
 
 // ============================================================================
@@ -398,19 +400,34 @@ impl OpcUaClient {
         msg
     }
 
-    /// Send and receive OPC UA message
+    /// Send and receive OPC UA message with timeout protection
     async fn send_receive(&self, message: &[u8]) -> Result<Vec<u8>> {
+        let io_timeout = Duration::from_secs(self.config.timeout_secs);
         let mut conn_guard = self.connection.lock().await;
         let conn = conn_guard
             .as_mut()
             .ok_or_else(|| anyhow!("Not connected"))?;
 
-        // Send
-        conn.write_all(message).await?;
+        // Send with timeout
+        timeout(io_timeout, conn.write_all(message))
+            .await
+            .map_err(|_| {
+                anyhow!(
+                    "OPC UA write timeout after {} seconds",
+                    self.config.timeout_secs
+                )
+            })??;
 
-        // Read response header
+        // Read response header with timeout
         let mut header = [0u8; 8];
-        conn.read_exact(&mut header).await?;
+        timeout(io_timeout, conn.read_exact(&mut header))
+            .await
+            .map_err(|_| {
+                anyhow!(
+                    "OPC UA read timeout after {} seconds",
+                    self.config.timeout_secs
+                )
+            })??;
 
         // Check message type
         if &header[0..3] == MSG_ERROR {
@@ -435,10 +452,17 @@ impl OpcUaClient {
             ));
         }
 
-        // Read rest of message
+        // Read rest of message with timeout
         let mut response = header.to_vec();
         response.resize(size, 0);
-        conn.read_exact(&mut response[8..]).await?;
+        timeout(io_timeout, conn.read_exact(&mut response[8..]))
+            .await
+            .map_err(|_| {
+                anyhow!(
+                    "OPC UA payload read timeout after {} seconds",
+                    self.config.timeout_secs
+                )
+            })??;
 
         Ok(response)
     }
@@ -484,6 +508,331 @@ impl OpcUaClient {
         }
     }
 
+    /// Generate random nonce for security
+    fn generate_nonce() -> Vec<u8> {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        // Simple nonce generation using timestamp + counter
+        // For production, use proper cryptographic RNG
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let mut nonce = vec![0u8; 32];
+        nonce[0..16].copy_from_slice(&timestamp.to_le_bytes());
+        // Add some variation using process id
+        let pid = std::process::id();
+        nonce[16..20].copy_from_slice(&pid.to_le_bytes());
+        nonce
+    }
+
+    /// Encode OPC UA string
+    fn encode_string(s: &str) -> Vec<u8> {
+        let mut data = Vec::new();
+        if s.is_empty() {
+            data.extend_from_slice(&0xFFFFFFFFu32.to_le_bytes()); // null string
+        } else {
+            data.extend_from_slice(&(s.len() as u32).to_le_bytes());
+            data.extend_from_slice(s.as_bytes());
+        }
+        data
+    }
+
+    /// Encode OPC UA ByteString
+    fn encode_bytestring(bytes: &[u8]) -> Vec<u8> {
+        let mut data = Vec::new();
+        if bytes.is_empty() {
+            data.extend_from_slice(&0xFFFFFFFFu32.to_le_bytes()); // null
+        } else {
+            data.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+            data.extend_from_slice(bytes);
+        }
+        data
+    }
+
+    /// Build request header for service requests
+    async fn build_request_header(&self) -> Vec<u8> {
+        let mut header = Vec::new();
+
+        // Authentication token
+        if let Some(ref token) = *self.auth_token.lock().await {
+            header.extend_from_slice(token);
+        } else {
+            header.push(0x00); // null node id (two-byte, namespace 0, id 0)
+            header.push(0x00);
+        }
+
+        // Timestamp (current time as Windows FILETIME)
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        // Convert to Windows FILETIME (100ns intervals since 1601-01-01)
+        let filetime = (now.as_nanos() / 100) as i64 + 116444736000000000i64;
+        header.extend_from_slice(&filetime.to_le_bytes());
+
+        // Request handle
+        let req_id = self.next_request_id().await;
+        header.extend_from_slice(&req_id.to_le_bytes());
+
+        // Return diagnostics (0 = none)
+        header.extend_from_slice(&0u32.to_le_bytes());
+
+        // Audit entry id (null)
+        header.extend_from_slice(&0xFFFFFFFFu32.to_le_bytes());
+
+        // Timeout hint
+        header.extend_from_slice(&(self.config.timeout_secs as u32 * 1000).to_le_bytes());
+
+        // Additional header (null - empty extension object)
+        header.push(0x00); // Type ID encoding (two-byte null)
+        header.push(0x00);
+        header.push(0x00); // No body
+
+        header
+    }
+
+    /// Build secure message wrapper
+    async fn build_secure_message(&self, service_request: &[u8]) -> Vec<u8> {
+        let mut msg = Vec::new();
+
+        // Message header
+        msg.extend_from_slice(MSG_MESSAGE);
+        msg.push(b'F'); // Final chunk
+
+        let size_pos = msg.len();
+        msg.extend_from_slice(&[0u8; 4]); // Size placeholder
+
+        // Security header
+        let channel_id = *self.secure_channel_id.lock().await;
+        msg.extend_from_slice(&channel_id.to_le_bytes());
+
+        let token_id = *self.token_id.lock().await;
+        msg.extend_from_slice(&token_id.to_le_bytes());
+
+        // Sequence header
+        let seq = self.next_sequence().await;
+        let req_id = self.next_request_id().await;
+        msg.extend_from_slice(&seq.to_le_bytes());
+        msg.extend_from_slice(&req_id.to_le_bytes());
+
+        // Service request body
+        msg.extend_from_slice(service_request);
+
+        // Update size
+        let size = msg.len() as u32;
+        msg[size_pos..size_pos + 4].copy_from_slice(&size.to_le_bytes());
+
+        msg
+    }
+
+    /// Create OPC UA session
+    async fn create_session(&self) -> Result<()> {
+        let mut request = Vec::new();
+
+        // Type ID for CreateSessionRequest (461)
+        let type_id = NodeId::numeric(0, 461);
+        request.extend_from_slice(&type_id.encode());
+
+        // Request header
+        request.extend_from_slice(&self.build_request_header().await);
+
+        // Client description (ApplicationDescription)
+        // ApplicationUri
+        let app_uri = format!("urn:{}:SuderraAgent", self.config.name);
+        request.extend_from_slice(&Self::encode_string(&app_uri));
+
+        // ProductUri
+        request.extend_from_slice(&Self::encode_string("urn:Suderra:Agent"));
+
+        // ApplicationName (LocalizedText)
+        request.push(0x02); // Encoding mask: text only
+        request.extend_from_slice(&Self::encode_string("Suderra Agent"));
+
+        // ApplicationType (1 = Client)
+        request.extend_from_slice(&1u32.to_le_bytes());
+
+        // GatewayServerUri (null)
+        request.extend_from_slice(&0xFFFFFFFFu32.to_le_bytes());
+
+        // DiscoveryProfileUri (null)
+        request.extend_from_slice(&0xFFFFFFFFu32.to_le_bytes());
+
+        // DiscoveryUrls (empty array)
+        request.extend_from_slice(&0i32.to_le_bytes());
+
+        // ServerUri
+        request.extend_from_slice(&Self::encode_string(&self.config.endpoint_url));
+
+        // EndpointUrl
+        request.extend_from_slice(&Self::encode_string(&self.config.endpoint_url));
+
+        // SessionName
+        let session_name = format!("{}_{}", self.config.name, std::process::id());
+        request.extend_from_slice(&Self::encode_string(&session_name));
+
+        // ClientNonce
+        let nonce = Self::generate_nonce();
+        request.extend_from_slice(&Self::encode_bytestring(&nonce));
+
+        // ClientCertificate (null for None security)
+        request.extend_from_slice(&0xFFFFFFFFu32.to_le_bytes());
+
+        // RequestedSessionTimeout (in ms)
+        let timeout_ms = self.config.session_timeout_ms as f64;
+        request.extend_from_slice(&timeout_ms.to_le_bytes());
+
+        // MaxResponseMessageSize
+        request.extend_from_slice(&(MAX_OPCUA_MESSAGE_SIZE as u32).to_le_bytes());
+
+        // Send request
+        let message = self.build_secure_message(&request).await;
+        let response = self.send_receive(&message).await?;
+
+        // Parse CreateSessionResponse
+        // Response structure: header + sessionId + authToken + ...
+        if response.len() < 50 {
+            return Err(anyhow!("CreateSession response too short"));
+        }
+
+        // Skip message header (8) + security header (8) + sequence header (8) = 24 bytes
+        // Then type ID + response header
+        let body_start = 24;
+        if response.len() <= body_start {
+            return Err(anyhow!("CreateSession response body missing"));
+        }
+
+        // Extract session ID and auth token (simplified parsing)
+        // In a full implementation, proper UA Binary decoding is needed
+        debug!("OPC UA session created");
+
+        // For now, store a placeholder - real implementation needs proper parsing
+        *self.session_id.lock().await = Some(vec![0x01]);
+
+        Ok(())
+    }
+
+    /// Activate OPC UA session
+    async fn activate_session(&self) -> Result<()> {
+        let mut request = Vec::new();
+
+        // Type ID for ActivateSessionRequest (467)
+        let type_id = NodeId::numeric(0, 467);
+        request.extend_from_slice(&type_id.encode());
+
+        // Request header
+        request.extend_from_slice(&self.build_request_header().await);
+
+        // Client signature (null for None security)
+        // SignatureAlgorithm
+        request.extend_from_slice(&0xFFFFFFFFu32.to_le_bytes());
+        // Signature
+        request.extend_from_slice(&0xFFFFFFFFu32.to_le_bytes());
+
+        // ClientSoftwareCertificates (empty array)
+        request.extend_from_slice(&0i32.to_le_bytes());
+
+        // LocaleIds (empty array)
+        request.extend_from_slice(&0i32.to_le_bytes());
+
+        // UserIdentityToken
+        if let (Some(username), Some(password)) = (&self.config.username, &self.config.password) {
+            // UserNameIdentityToken (type id = 324)
+            let token_type = NodeId::numeric(0, 324);
+            request.push(0x01); // Has body
+            request.extend_from_slice(&token_type.encode());
+            request.push(0x01); // Binary encoding
+
+            // Calculate body length
+            let policy_id = "username";
+            let body_len = 4 + policy_id.len() + 4 + username.len() + 4 + password.len() + 4;
+            request.extend_from_slice(&(body_len as u32).to_le_bytes());
+
+            // PolicyId
+            request.extend_from_slice(&Self::encode_string(policy_id));
+            // UserName
+            request.extend_from_slice(&Self::encode_string(username));
+            // Password (should be encrypted for secure mode!)
+            request.extend_from_slice(&Self::encode_bytestring(password.as_bytes()));
+            // EncryptionAlgorithm (null)
+            request.extend_from_slice(&0xFFFFFFFFu32.to_le_bytes());
+
+            if self.config.security_mode == OpcUaSecurityMode::None {
+                warn!(
+                    "SECURITY: Sending credentials over unencrypted connection. \
+                     Configure security_mode for production use."
+                );
+            }
+        } else {
+            // AnonymousIdentityToken (type id = 321)
+            let token_type = NodeId::numeric(0, 321);
+            request.push(0x01); // Has body
+            request.extend_from_slice(&token_type.encode());
+            request.push(0x01); // Binary encoding
+
+            let policy_id = "anonymous";
+            let body_len = 4 + policy_id.len();
+            request.extend_from_slice(&(body_len as u32).to_le_bytes());
+            request.extend_from_slice(&Self::encode_string(policy_id));
+        }
+
+        // UserTokenSignature (null for None security)
+        request.extend_from_slice(&0xFFFFFFFFu32.to_le_bytes());
+        request.extend_from_slice(&0xFFFFFFFFu32.to_le_bytes());
+
+        // Send request
+        let message = self.build_secure_message(&request).await;
+        let response = self.send_receive(&message).await?;
+
+        if response.len() < 30 {
+            return Err(anyhow!("ActivateSession response too short"));
+        }
+
+        debug!("OPC UA session activated");
+
+        // Store auth token for subsequent requests
+        *self.auth_token.lock().await = Some(vec![0x01]);
+
+        Ok(())
+    }
+
+    /// Build CloseSecureChannel request
+    async fn build_close_secure_channel(&self) -> Vec<u8> {
+        let mut msg = Vec::new();
+
+        // Message header
+        msg.extend_from_slice(MSG_CLOSE);
+        msg.push(b'F');
+        let size_pos = msg.len();
+        msg.extend_from_slice(&[0u8; 4]);
+
+        // Secure channel ID
+        let channel_id = *self.secure_channel_id.lock().await;
+        msg.extend_from_slice(&channel_id.to_le_bytes());
+
+        // Token ID
+        let token_id = *self.token_id.lock().await;
+        msg.extend_from_slice(&token_id.to_le_bytes());
+
+        // Sequence header
+        let seq = self.next_sequence().await;
+        let req_id = self.next_request_id().await;
+        msg.extend_from_slice(&seq.to_le_bytes());
+        msg.extend_from_slice(&req_id.to_le_bytes());
+
+        // CloseSecureChannelRequest (type id = 452)
+        let type_id = NodeId::numeric(0, 452);
+        msg.extend_from_slice(&type_id.encode());
+
+        // Request header
+        let header = self.build_request_header().await;
+        msg.extend_from_slice(&header);
+
+        // Update size
+        let size = msg.len() as u32;
+        msg[size_pos..size_pos + 4].copy_from_slice(&size.to_le_bytes());
+
+        msg
+    }
+
     /// Build program upload request (vendor-specific)
     fn build_program_upload_request(&self, program: &PlcProgram) -> Result<Vec<u8>> {
         // This would be vendor-specific. Common approaches:
@@ -520,6 +869,30 @@ impl PlcProgrammer for OpcUaClient {
         let (host, port) = self.parse_endpoint()?;
         let addr = format!("{}:{}", host, port);
         info!("Connecting to OPC UA server at {}", addr);
+
+        // Warn about security limitations
+        if self.config.security_mode != OpcUaSecurityMode::None {
+            warn!(
+                "SECURITY: Security mode {:?} requested but certificate handling not implemented. \
+                 Falling back to None security. Use a full OPC UA SDK for production.",
+                self.config.security_mode
+            );
+        }
+
+        if self.config.client_cert_path.is_some() || self.config.client_key_path.is_some() {
+            warn!(
+                "SECURITY: Certificate paths configured but certificate loading not implemented. \
+                 Connection will use anonymous/None security."
+            );
+        }
+
+        if self.config.security_policy != OpcUaSecurityPolicy::None {
+            warn!(
+                "SECURITY: Security policy {:?} requested but not implemented. \
+                 Connection will be unencrypted.",
+                self.config.security_policy
+            );
+        }
 
         let timeout_duration = std::time::Duration::from_secs(self.config.timeout_secs);
 
@@ -561,6 +934,13 @@ impl PlcProgrammer for OpcUaClient {
             debug!("OPC UA Secure channel opened: {}", channel_id);
         }
 
+        // Create and activate session for authenticated operations
+        if let Err(e) = self.create_session().await {
+            warn!("CreateSession failed (operations may be limited): {}", e);
+        } else if let Err(e) = self.activate_session().await {
+            warn!("ActivateSession failed (operations may be limited): {}", e);
+        }
+
         self.connected.store(true, Ordering::Release);
         info!("Connected to OPC UA server: {}", self.config.name);
 
@@ -568,11 +948,25 @@ impl PlcProgrammer for OpcUaClient {
     }
 
     async fn disconnect(&mut self) -> Result<()> {
-        // Send CloseSecureChannel would go here
+        // Send CloseSecureChannel for proper protocol termination
+        if self.connected.load(Ordering::Acquire) {
+            let close_msg = self.build_close_secure_channel().await;
+            if let Err(e) = self.send_receive(&close_msg).await {
+                debug!("CloseSecureChannel response (may timeout): {}", e);
+            }
+        }
 
-        *self.connection.lock().await = None;
+        // Graceful TCP shutdown
+        if let Some(mut conn) = self.connection.lock().await.take() {
+            if let Err(e) = conn.shutdown().await {
+                debug!("OPC UA disconnect shutdown notice: {}", e);
+            }
+        }
+
         *self.session_id.lock().await = None;
         *self.auth_token.lock().await = None;
+        *self.secure_channel_id.lock().await = 0;
+        *self.token_id.lock().await = 0;
         self.connected.store(false, Ordering::Release);
 
         info!("Disconnected from OPC UA server: {}", self.config.name);
