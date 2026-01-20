@@ -2235,15 +2235,242 @@ if let Err(e) = self.login().await {
 
 ---
 
+## PHASE 22: Workflow Bug Fixes
+
+**Date**: 2026-01-20
+**Version**: 1.3.3
+
+Deep flow analysis of all `.rs` files revealed 9 critical workflow bugs.
+
+### 22.1 Circuit Breaker Infinite Loop
+**File**: `src/resilience/circuit_breaker.rs`
+**Severity**: CRITICAL
+**Issue**: CAS loop in `is_open()` could spin indefinitely under pathological contention
+
+```rust
+// Before (POTENTIAL INFINITE LOOP)
+loop {
+    let now = Instant::now();
+    // ... CAS logic with no total limit
+}
+
+// After (v1.3.3)
+const MAX_TOTAL_ITERATIONS: u32 = 100;
+loop {
+    total_iterations += 1;
+    if total_iterations > MAX_TOTAL_ITERATIONS {
+        return true;  // Fail-safe: treat as open
+    }
+    // ... rest of logic
+}
+```
+
+**Impact**: Prevents CPU hang; fail-safe behavior protects system
+
+---
+
+### 22.2 GPIO Command Loss on Retry Exhaustion
+**File**: `src/gpio.rs`
+**Severity**: HIGH
+**Issue**: Command dropped without logging details on final retry failure
+
+```rust
+// Before (COMMAND LOST)
+Err(TrySendError::Full(_)) => {
+    return Err("Channel full".into());
+}
+
+// After (v1.3.3)
+Err(TrySendError::Full(returned_cmd)) => {
+    cmd = returned_cmd;  // Preserve
+    warn!("GPIO channel full after {} retries, command lost: {:?}",
+          GPIO_SEND_RETRIES, cmd);
+    return Err(...);
+}
+```
+
+**Impact**: Debugging aid; command details preserved for analysis
+
+---
+
+### 22.3 Program State Race Condition (Non-Atomic Deploy)
+**File**: `src/commands.rs`
+**Severity**: HIGH
+**Issue**: Script deployment and state save were not atomic; crash could leave inconsistent state
+
+```rust
+// Before (RACE CONDITION)
+script_storage.add_script(script).await?;
+save_program_state(&state)?;  // If this fails, script orphaned!
+
+// After (v1.3.3)
+let script_id = program.script.id.clone();
+script_storage.add_script(script).await?;
+if let Err(e) = save_program_state(&state) {
+    script_storage.delete(&script_id).await.ok();  // Rollback
+    return Err(...);
+}
+```
+
+**Impact**: Atomic-like behavior with rollback on failure
+
+---
+
+### 22.4 MQTT Config Incomplete Validation
+**File**: `src/main.rs`
+**Severity**: HIGH
+**Issue**: Only username checked; missing password/broker allowed partial config
+
+```rust
+// Before (INCOMPLETE)
+let needs_activation = mqtt.username.is_none();
+
+// After (v1.3.3)
+let needs_activation = mqtt.username.is_none()
+    || mqtt.password.is_none()
+    || mqtt.broker.is_none();
+if !missing_username && (missing_password || missing_broker) {
+    warn!("MQTT config incomplete: username={}, password={}, broker={}",
+          !missing_username, !missing_password, !missing_broker);
+}
+```
+
+**Impact**: Prevents partial MQTT config from attempting connection
+
+---
+
+### 22.5 Reboot Command Silent Failure
+**File**: `src/commands.rs`
+**Severity**: MEDIUM
+**Issue**: No warning that reboot/restart failure cannot be reported
+
+```rust
+// Before (NO WARNING)
+Command::new("shutdown").arg("-r")...
+
+// After (v1.3.3)
+json!({
+    "status": "initiating",
+    "note": "Reboot initiated. If this fails, no response can be sent."
+})
+```
+
+**Impact**: Clear expectation management in command response
+
+---
+
+### 22.6 Activation Loop No Backoff
+**File**: `src/main.rs`
+**Severity**: HIGH
+**Issue**: Failed activation immediately retried without delay
+
+```rust
+// Before (NO BACKOFF)
+while needs_activation {
+    client.activate().await?;  // Retry immediately on failure
+}
+
+// After (v1.3.3)
+let mut retry_count = 0;
+while needs_activation {
+    if let Err(e) = client.activate().await {
+        let delay = 5u64 * (1 << retry_count.min(2));  // 5s, 10s, 20s
+        tokio::time::sleep(Duration::from_secs(delay)).await;
+        retry_count += 1;
+    }
+}
+```
+
+**Impact**: Prevents thundering herd; respects server resources
+
+---
+
+### 22.7 Program State File Corruption Handler
+**File**: `src/commands.rs`
+**Severity**: HIGH
+**Issue**: Corrupted JSON file silently replaced; no forensic backup
+
+```rust
+// Before (DATA LOSS)
+Err(_) => ProgramState::default()  // Corrupted file lost!
+
+// After (v1.3.3)
+Err(e) => {
+    let backup = format!("{}.corrupted.{}", path, timestamp);
+    fs::copy(&path, &backup).ok();
+    warn!("Corrupted program state backed up to: {}", backup);
+    ProgramState::default()
+}
+```
+
+**Impact**: Forensic preservation of corrupted data for analysis
+
+---
+
+### 22.8 SQLite Mutex Poison Recovery
+**File**: `src/offline_queue.rs`
+**Severity**: HIGH
+**Issue**: Poison recovery didn't validate connection health
+
+```rust
+// Before (UNSAFE RECOVERY)
+let guard = mutex.lock().unwrap_or_else(|e| e.into_inner());
+// No validation - connection may be corrupted!
+
+// After (v1.3.3)
+fn acquire_sqlite_lock(mutex: &Mutex<Connection>) -> Result<MutexGuard<'_, Connection>> {
+    let guard = mutex.lock().unwrap_or_else(|e| e.into_inner());
+    if was_poisoned {
+        guard.execute("SELECT 1", [])?;  // Health check
+    }
+    Ok(guard)
+}
+```
+
+**Impact**: Validates connection integrity after panic recovery
+
+---
+
+### 22.9 Log Level Change Feedback
+**File**: `src/commands.rs`
+**Severity**: MEDIUM
+**Issue**: Unclear whether log level change was applied
+
+```rust
+// Before (VAGUE)
+json!({ "message": "Log level updated" })
+
+// After (v1.3.3)
+json!({
+    "message": "Log level updated",
+    "previous_level": old_level,
+    "new_level": new_level,
+    "applied_immediately": true
+})
+```
+
+**Impact**: Clear audit trail; confirms change was applied
+
+---
+
 ## v1.3.3 Security Impact Summary
 
 | Issue | Severity | Status |
 |-------|----------|--------|
+| Circuit breaker infinite loop | CRITICAL | Fixed (MAX_TOTAL_ITERATIONS) |
+| GPIO command loss | HIGH | Fixed (preserve + log) |
+| Program state race condition | HIGH | Fixed (rollback) |
+| MQTT config incomplete | HIGH | Fixed (full validation) |
+| Reboot silent failure | MEDIUM | Fixed (explicit note) |
+| Activation loop no backoff | HIGH | Fixed (exponential backoff) |
+| Program state corruption | HIGH | Fixed (backup) |
+| SQLite poison recovery | HIGH | Fixed (health check) |
+| Log level feedback | MEDIUM | Fixed (detailed response) |
 | Modbus spin_loop CPU waste | MEDIUM | Fixed (deprecated) |
 | Codesys weak security warning | MEDIUM | Fixed |
 | Codesys connection leak | HIGH | Fixed |
 
-**Total: 3 issues fixed in v1.3.3**
+**Total: 12 issues fixed in v1.3.3 (9 workflow + 3 deep review)**
 
 ---
 
