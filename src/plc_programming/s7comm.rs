@@ -25,9 +25,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
+use tokio::time::timeout;
 use tracing::{debug, info, warn};
 
 // ============================================================================
@@ -76,6 +78,67 @@ const S7_FUNC_DOWNLOAD: u8 = 0x1B;
 const S7_FUNC_END_DOWNLOAD: u8 = 0x1C;
 const S7_FUNC_PLC_CONTROL: u8 = 0x28;
 const S7_FUNC_PLC_STOP: u8 = 0x29;
+
+// ============================================================================
+// S7 Error Code Parsing
+// ============================================================================
+
+/// Parse S7 error class and code into human-readable message
+fn parse_s7_error(error_class: u8, error_code: u8) -> String {
+    let class_desc = match error_class {
+        0x00 => "No error",
+        0x81 => "Application relationship error",
+        0x82 => "Object definition error",
+        0x83 => "No resources available",
+        0x84 => "Service processing error",
+        0x85 => "Supplies error",
+        0x87 => "Access error",
+        0xD2 => "OVS error",
+        0xD4 => "Diagnostic error",
+        0xD6 => "Protection error",
+        0xDC => "Block download error",
+        0xDD => "Block upload error",
+        0xDE => "Block delete error",
+        0xDF => "Password error",
+        _ => "Unknown error class",
+    };
+
+    let code_desc = match (error_class, error_code) {
+        (0x00, 0x00) => "Success",
+        (0x81, 0x01) => "Invalid syntax ID",
+        (0x81, 0x04) => "No resources",
+        (0x82, 0x01) => "Invalid address",
+        (0x82, 0x02) => "Data type not supported",
+        (0x82, 0x03) => "Data type inconsistent",
+        (0x82, 0x04) => "Object does not exist",
+        (0x83, 0x01) => "CPU already in RUN",
+        (0x83, 0x02) => "CPU already in STOP",
+        (0x84, 0x01) => "PDU size error",
+        (0x84, 0x04) => "Hardware fault",
+        (0x85, 0x01) => "Block checksum error",
+        (0x87, 0x01) => "Read access not allowed",
+        (0x87, 0x02) => "Write access not allowed",
+        (0xD4, 0x01) => "System info function not implemented",
+        (0xD6, 0x01) => "CPU protection level",
+        (0xD6, 0x02) => "Insufficient privileges",
+        (0xDC, 0x01) => "Block number already exists",
+        (0xDC, 0x02) => "Block type not allowed",
+        (0xDC, 0x03) => "Block size too large",
+        _ => "",
+    };
+
+    if code_desc.is_empty() {
+        format!(
+            "{} (class=0x{:02X}, code=0x{:02X})",
+            class_desc, error_class, error_code
+        )
+    } else {
+        format!(
+            "{}: {} (class=0x{:02X}, code=0x{:02X})",
+            class_desc, code_desc, error_class, error_code
+        )
+    }
+}
 
 // ============================================================================
 // Configuration
@@ -312,8 +375,9 @@ impl S7Client {
         packet
     }
 
-    /// Send ISO-on-TCP packet
+    /// Send ISO-on-TCP packet with timeout protection
     async fn send_packet(&self, cotp_payload: &[u8]) -> Result<Vec<u8>> {
+        let io_timeout = Duration::from_secs(self.config.timeout_secs);
         let mut conn_guard = self.connection.lock().await;
         let conn = conn_guard
             .as_mut()
@@ -324,12 +388,21 @@ impl S7Client {
         let mut packet = tpkt;
         packet.extend_from_slice(cotp_payload);
 
-        // Send
-        conn.write_all(&packet).await?;
+        // Send with timeout
+        timeout(io_timeout, conn.write_all(&packet))
+            .await
+            .map_err(|_| {
+                anyhow!(
+                    "S7 write timeout after {} seconds",
+                    self.config.timeout_secs
+                )
+            })??;
 
-        // Receive response
+        // Receive response with timeout
         let mut tpkt_header = [0u8; 4];
-        conn.read_exact(&mut tpkt_header).await?;
+        timeout(io_timeout, conn.read_exact(&mut tpkt_header))
+            .await
+            .map_err(|_| anyhow!("S7 read timeout after {} seconds", self.config.timeout_secs))??;
 
         if tpkt_header[0] != 0x03 {
             return Err(anyhow!("Invalid TPKT response"));
@@ -351,7 +424,9 @@ impl S7Client {
         }
         let length = total_length - 4;
         let mut response = vec![0u8; length];
-        conn.read_exact(&mut response).await?;
+        timeout(io_timeout, conn.read_exact(&mut response))
+            .await
+            .map_err(|_| anyhow!("S7 read timeout after {} seconds", self.config.timeout_secs))??;
 
         Ok(response)
     }
@@ -385,16 +460,40 @@ impl S7Client {
             return Err(anyhow!("Invalid S7 setup response"));
         }
 
-        // Check for errors
+        // Check for errors - S7 response format:
+        // [0] = protocol ID (0x32)
+        // [1] = message type (0x02=ACK, 0x03=ACK_DATA)
+        // [2-3] = reserved
+        // [4-5] = PDU reference
+        // [6-7] = parameter length
+        // [8-9] = data length
+        // [10] = error class (for ACK_DATA)
+        // [11] = error code (for ACK_DATA)
         if s7_response[1] == S7_ACK_DATA {
+            // Check error class and code
+            let error_class = s7_response[10];
+            let error_code = s7_response[11];
+            if error_class != 0x00 {
+                let error_msg = parse_s7_error(error_class, error_code);
+                return Err(anyhow!("S7 setup failed: {}", error_msg));
+            }
+
             // Extract negotiated PDU size
             if s7_response.len() >= 18 {
                 let pdu_size = (s7_response[16] as u16) << 8 | s7_response[17] as u16;
                 *self.negotiated_pdu.lock().await = pdu_size;
                 debug!("Negotiated PDU size: {}", pdu_size);
             }
+        } else if s7_response[1] == S7_ACK {
+            // ACK without data - check if there's an error indicated
+            return Err(anyhow!(
+                "S7 setup rejected (ACK without data) - PLC may require authentication"
+            ));
         } else {
-            return Err(anyhow!("S7 setup failed"));
+            return Err(anyhow!(
+                "S7 setup failed: unexpected message type 0x{:02X}",
+                s7_response[1]
+            ));
         }
 
         Ok(())
@@ -471,6 +570,95 @@ impl S7Client {
         request
     }
 
+    /// Get maximum data size per packet based on negotiated PDU
+    /// S7 packet overhead: TPKT(4) + COTP(3) + S7 header(10-12) + params(~10) ≈ 28 bytes
+    async fn max_data_per_packet(&self) -> usize {
+        const S7_OVERHEAD: usize = 32; // Conservative overhead estimate
+        let negotiated = *self.negotiated_pdu.lock().await as usize;
+        negotiated.saturating_sub(S7_OVERHEAD)
+    }
+
+    /// Send large data in chunks respecting negotiated PDU size
+    async fn send_chunked_data(
+        &self,
+        data: &[u8],
+        block_type: S7BlockType,
+        block_num: u16,
+    ) -> Result<()> {
+        let max_chunk = self.max_data_per_packet().await;
+        if max_chunk == 0 {
+            return Err(anyhow!("Negotiated PDU too small for data transfer"));
+        }
+
+        let total_chunks = (data.len() + max_chunk - 1) / max_chunk;
+        debug!(
+            "Sending {} bytes in {} chunks (max {} bytes/chunk)",
+            data.len(),
+            total_chunks,
+            max_chunk
+        );
+
+        for (i, chunk) in data.chunks(max_chunk).enumerate() {
+            let is_last = i == total_chunks - 1;
+            debug!(
+                "Sending chunk {}/{} ({} bytes, last={})",
+                i + 1,
+                total_chunks,
+                chunk.len(),
+                is_last
+            );
+
+            // Build download data packet
+            let pdu_ref = self.next_pdu_ref().await;
+            let mut s7_data = vec![
+                S7_PROTOCOL_ID,
+                S7_JOB,
+                0x00,
+                0x00,
+                (pdu_ref >> 8) as u8,
+                (pdu_ref & 0xFF) as u8,
+            ];
+
+            // Parameter length (2 bytes) and data length (2 bytes)
+            let param_len: u16 = 2; // Function + reserved
+            let data_len = (chunk.len() + 4) as u16; // chunk + 4 bytes header
+            s7_data.extend_from_slice(&param_len.to_be_bytes());
+            s7_data.extend_from_slice(&data_len.to_be_bytes());
+
+            // Parameters
+            s7_data.push(S7_FUNC_DOWNLOAD);
+            s7_data.push(if is_last { 0x00 } else { 0x01 }); // More data flag
+
+            // Data header
+            s7_data.extend_from_slice(&[0x00, 0xFB]); // Return code + transport size
+            s7_data.extend_from_slice(&(chunk.len() as u16).to_be_bytes());
+
+            // Actual data
+            s7_data.extend_from_slice(chunk);
+
+            let cotp_dt = Self::build_cotp_dt(&s7_data);
+            let response = self.send_packet(&cotp_dt).await?;
+
+            // Verify response
+            if response.len() < 6 {
+                return Err(anyhow!("Invalid download response for chunk {}", i + 1));
+            }
+            let s7_resp = &response[3..];
+            if s7_resp.len() >= 12 && s7_resp[10] != 0x00 {
+                let error_msg = parse_s7_error(s7_resp[10], s7_resp[11]);
+                return Err(anyhow!("Download chunk {} failed: {}", i + 1, error_msg));
+            }
+        }
+
+        debug!(
+            "Successfully sent {} bytes for {:?}{}",
+            data.len(),
+            block_type,
+            block_num
+        );
+        Ok(())
+    }
+
     /// Convert ST program to S7 AWL/MC7 format
     fn compile_to_mc7(&self, program: &PlcProgram) -> Result<Vec<u8>> {
         // In a real implementation, this would compile ST to MC7 bytecode.
@@ -524,6 +712,10 @@ impl PlcProgrammer for S7Client {
         let addr = format!("{}:{}", self.config.address, self.config.port);
         info!("Connecting to Siemens S7 PLC at {}", addr);
 
+        // Security warning: S7comm protocol does not support TLS encryption
+        // For secure deployments, use VPN or network segmentation per IEC 62443
+        warn!("S7comm connection is unencrypted - ensure network is secured (VPN/segmentation)");
+
         let timeout_duration = std::time::Duration::from_secs(self.config.timeout_secs);
 
         let stream =
@@ -544,7 +736,13 @@ impl PlcProgrammer for S7Client {
     }
 
     async fn disconnect(&mut self) -> Result<()> {
-        *self.connection.lock().await = None;
+        // Graceful disconnect: properly close TCP connection
+        if let Some(mut conn) = self.connection.lock().await.take() {
+            // Attempt graceful shutdown, ignore errors (connection might already be closed)
+            if let Err(e) = conn.shutdown().await {
+                debug!("S7 disconnect shutdown notice: {}", e);
+            }
+        }
         self.connected.store(false, Ordering::Release);
         info!("Disconnected from Siemens S7 PLC: {}", self.config.name);
         Ok(())
@@ -587,19 +785,66 @@ impl PlcProgrammer for S7Client {
 
         // Compile to MC7
         let mc7 = self.compile_to_mc7(program)?;
+        let mut errors = Vec::new();
+        let mut success = true;
 
-        // For S7, we upload individual blocks
-        // Start download sequence
+        // S7 download sequence:
+        // 1. Start download request
+        // 2. Send data in chunks (respecting negotiated PDU size)
+        // 3. End download request
+
+        // Step 1: Start download
         let download_req = self.build_download_request(S7BlockType::OB, 1).await;
         let cotp_dt = Self::build_cotp_dt(&download_req);
 
-        let response = self.send_packet(&cotp_dt).await;
+        match self.send_packet(&cotp_dt).await {
+            Ok(response) => {
+                // Verify start download was accepted
+                if response.len() >= 6 {
+                    let s7_resp = &response[3..];
+                    if s7_resp.len() >= 12 && s7_resp[10] != 0x00 {
+                        let error_msg = parse_s7_error(s7_resp[10], s7_resp[11]);
+                        errors.push(format!("Start download rejected: {}", error_msg));
+                        success = false;
+                    }
+                }
 
-        let success = response.is_ok();
-        let errors = match &response {
-            Ok(_) => Vec::new(),
-            Err(e) => vec![e.to_string()],
-        };
+                // Step 2: Send data chunks (only if start was successful)
+                if success {
+                    if let Err(e) = self.send_chunked_data(&mc7, S7BlockType::OB, 1).await {
+                        errors.push(format!("Data transfer failed: {}", e));
+                        success = false;
+                    }
+                }
+
+                // Step 3: End download (only if previous steps succeeded)
+                if success {
+                    let pdu_ref = self.next_pdu_ref().await;
+                    let end_download = vec![
+                        S7_PROTOCOL_ID,
+                        S7_JOB,
+                        0x00,
+                        0x00,
+                        (pdu_ref >> 8) as u8,
+                        (pdu_ref & 0xFF) as u8,
+                        0x00,
+                        0x01, // Param length
+                        0x00,
+                        0x00, // Data length
+                        S7_FUNC_END_DOWNLOAD,
+                    ];
+                    let cotp_end = Self::build_cotp_dt(&end_download);
+                    if let Err(e) = self.send_packet(&cotp_end).await {
+                        errors.push(format!("End download failed: {}", e));
+                        success = false;
+                    }
+                }
+            }
+            Err(e) => {
+                errors.push(e.to_string());
+                success = false;
+            }
+        }
 
         let result = UploadResult {
             success,
