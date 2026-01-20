@@ -81,8 +81,16 @@ const TYPE_ID_CREATE_SESSION_RESPONSE: u32 = 464;
 const TYPE_ID_ACTIVATE_SESSION_REQUEST: u32 = 467;
 /// ActivateSessionResponse Type ID
 const TYPE_ID_ACTIVATE_SESSION_RESPONSE: u32 = 470;
+/// OpenSecureChannelRequest Type ID
+const TYPE_ID_OPEN_SECURE_CHANNEL_REQUEST: u32 = 446;
+/// OpenSecureChannelResponse Type ID
+const TYPE_ID_OPEN_SECURE_CHANNEL_RESPONSE: u32 = 449;
 /// CloseSecureChannelRequest Type ID
 const TYPE_ID_CLOSE_SECURE_CHANNEL_REQUEST: u32 = 452;
+/// CloseSecureChannelResponse Type ID
+const TYPE_ID_CLOSE_SECURE_CHANNEL_RESPONSE: u32 = 455;
+/// ServiceFault Type ID (general error response)
+const TYPE_ID_SERVICE_FAULT: u32 = 397;
 /// BrowseRequest Type ID
 const TYPE_ID_BROWSE_REQUEST: u32 = 527;
 /// BrowseResponse Type ID
@@ -268,22 +276,52 @@ const TYPE_ID_DELETE_SUBSCRIPTIONS_RESPONSE: u32 = 850;
 // OPC UA Well-Known Node IDs (from OPC UA Specification Part 5)
 // ============================================================================
 
-/// Server node (i=2253)
-const NODE_ID_SERVER: u32 = 2253;
-/// ServerStatus node (i=2256)
-const NODE_ID_SERVER_STATUS: u32 = 2256;
-/// ServerState node (i=2259)
-const NODE_ID_SERVER_STATE: u32 = 2259;
-/// CurrentTime node (i=2258)
-const NODE_ID_CURRENT_TIME: u32 = 2258;
+/// Root folder (i=84)
+const NODE_ID_ROOT_FOLDER: u32 = 84;
 /// Objects folder (i=85)
 const NODE_ID_OBJECTS_FOLDER: u32 = 85;
-/// Server_ServerStatus_State node (i=2259)
-const NODE_ID_SERVER_STATE_VALUE: u32 = 2259;
+/// Types folder (i=86)
+const NODE_ID_TYPES_FOLDER: u32 = 86;
+/// Views folder (i=87)
+const NODE_ID_VIEWS_FOLDER: u32 = 87;
+/// Server node (i=2253)
+const NODE_ID_SERVER: u32 = 2253;
+/// ServerArray node (i=2254)
+const NODE_ID_SERVER_ARRAY: u32 = 2254;
+/// NamespaceArray node (i=2255)
+const NODE_ID_NAMESPACE_ARRAY: u32 = 2255;
+/// ServerStatus node (i=2256)
+const NODE_ID_SERVER_STATUS: u32 = 2256;
+/// BuildInfo node (i=2260)
+const NODE_ID_BUILD_INFO: u32 = 2260;
 /// ProductName node (i=2261)
 const NODE_ID_PRODUCT_NAME: u32 = 2261;
+/// ProductUri node (i=2262)
+const NODE_ID_PRODUCT_URI: u32 = 2262;
 /// SoftwareVersion node (i=2263)
 const NODE_ID_SOFTWARE_VERSION: u32 = 2263;
+/// BuildNumber node (i=2264)
+const NODE_ID_BUILD_NUMBER: u32 = 2264;
+/// BuildDate node (i=2265)
+const NODE_ID_BUILD_DATE: u32 = 2265;
+/// CurrentTime node (i=2258)
+const NODE_ID_CURRENT_TIME: u32 = 2258;
+/// ServerState node (i=2259)
+const NODE_ID_SERVER_STATE: u32 = 2259;
+/// Server_ServerStatus_State node (i=2259)
+const NODE_ID_SERVER_STATE_VALUE: u32 = 2259;
+/// ServiceLevel node (i=2267)
+const NODE_ID_SERVICE_LEVEL: u32 = 2267;
+/// Auditing node (i=2994)
+const NODE_ID_AUDITING: u32 = 2994;
+/// ServerCapabilities node (i=2268)
+const NODE_ID_SERVER_CAPABILITIES: u32 = 2268;
+/// ServerDiagnostics node (i=2274)
+const NODE_ID_SERVER_DIAGNOSTICS: u32 = 2274;
+/// VendorServerInfo node (i=2295)
+const NODE_ID_VENDOR_SERVER_INFO: u32 = 2295;
+/// ServerRedundancy node (i=2296)
+const NODE_ID_SERVER_REDUNDANCY: u32 = 2296;
 
 // ============================================================================
 // OPC UA Status Codes
@@ -293,17 +331,105 @@ const NODE_ID_SOFTWARE_VERSION: u32 = 2263;
 const STATUS_GOOD: u32 = 0x00000000;
 /// Bad status code mask
 const STATUS_BAD_MASK: u32 = 0x80000000;
+/// Uncertain status code mask
+const STATUS_UNCERTAIN_MASK: u32 = 0x40000000;
+/// Bad - Unexpected error
+const STATUS_BAD_UNEXPECTED_ERROR: u32 = 0x80010000;
+/// Bad - Internal error
+const STATUS_BAD_INTERNAL_ERROR: u32 = 0x80020000;
+/// Bad - Out of memory
+const STATUS_BAD_OUT_OF_MEMORY: u32 = 0x80030000;
+/// Bad - Resource unavailable
+const STATUS_BAD_RESOURCE_UNAVAILABLE: u32 = 0x80040000;
+/// Bad - Communication error
+const STATUS_BAD_COMMUNICATION_ERROR: u32 = 0x80050000;
+/// Bad - Encoding error
+const STATUS_BAD_ENCODING_ERROR: u32 = 0x80060000;
+/// Bad - Decoding error
+const STATUS_BAD_DECODING_ERROR: u32 = 0x80070000;
+/// Bad - Timeout
+const STATUS_BAD_TIMEOUT: u32 = 0x800A0000;
+/// Bad - Service unsupported
+const STATUS_BAD_SERVICE_UNSUPPORTED: u32 = 0x800B0000;
+/// Bad - Shutdown
+const STATUS_BAD_SHUTDOWN: u32 = 0x800C0000;
+/// Bad - Server not connected
+const STATUS_BAD_SERVER_NOT_CONNECTED: u32 = 0x800D0000;
+/// Bad - Server halted
+const STATUS_BAD_SERVER_HALTED: u32 = 0x800E0000;
+/// Bad - Secure channel ID invalid
+const STATUS_BAD_SECURE_CHANNEL_ID_INVALID: u32 = 0x80220000;
+/// Bad - Session ID invalid
+const STATUS_BAD_SESSION_ID_INVALID: u32 = 0x80250000;
+/// Bad - Session closed
+const STATUS_BAD_SESSION_CLOSED: u32 = 0x80260000;
+/// Bad - Session not activated
+const STATUS_BAD_SESSION_NOT_ACTIVATED: u32 = 0x80270000;
+/// Bad - Node ID invalid
+const STATUS_BAD_NODE_ID_INVALID: u32 = 0x80330000;
+/// Bad - Node ID unknown
+const STATUS_BAD_NODE_ID_UNKNOWN: u32 = 0x80340000;
+/// Bad - Attribute ID invalid
+const STATUS_BAD_ATTRIBUTE_ID_INVALID: u32 = 0x80350000;
+/// Bad - Not readable
+const STATUS_BAD_NOT_READABLE: u32 = 0x803A0000;
+/// Bad - Not writable
+const STATUS_BAD_NOT_WRITABLE: u32 = 0x803B0000;
+/// Bad - User access denied
+const STATUS_BAD_USER_ACCESS_DENIED: u32 = 0x801F0000;
+/// Bad - Identity token invalid
+const STATUS_BAD_IDENTITY_TOKEN_INVALID: u32 = 0x80200000;
+/// Bad - Identity token rejected
+const STATUS_BAD_IDENTITY_TOKEN_REJECTED: u32 = 0x80210000;
 
 // ============================================================================
 // OPC UA Attribute IDs
 // ============================================================================
 
-/// Value attribute
-const ATTRIBUTE_VALUE: u32 = 13;
+/// NodeId attribute
+const ATTRIBUTE_NODE_ID: u32 = 1;
+/// NodeClass attribute
+const ATTRIBUTE_NODE_CLASS: u32 = 2;
 /// BrowseName attribute
 const ATTRIBUTE_BROWSE_NAME: u32 = 3;
 /// DisplayName attribute
 const ATTRIBUTE_DISPLAY_NAME: u32 = 4;
+/// Description attribute
+const ATTRIBUTE_DESCRIPTION: u32 = 5;
+/// WriteMask attribute
+const ATTRIBUTE_WRITE_MASK: u32 = 6;
+/// UserWriteMask attribute
+const ATTRIBUTE_USER_WRITE_MASK: u32 = 7;
+/// IsAbstract attribute
+const ATTRIBUTE_IS_ABSTRACT: u32 = 8;
+/// Symmetric attribute
+const ATTRIBUTE_SYMMETRIC: u32 = 9;
+/// InverseName attribute
+const ATTRIBUTE_INVERSE_NAME: u32 = 10;
+/// ContainsNoLoops attribute
+const ATTRIBUTE_CONTAINS_NO_LOOPS: u32 = 11;
+/// EventNotifier attribute
+const ATTRIBUTE_EVENT_NOTIFIER: u32 = 12;
+/// Value attribute
+const ATTRIBUTE_VALUE: u32 = 13;
+/// DataType attribute
+const ATTRIBUTE_DATA_TYPE: u32 = 14;
+/// ValueRank attribute
+const ATTRIBUTE_VALUE_RANK: u32 = 15;
+/// ArrayDimensions attribute
+const ATTRIBUTE_ARRAY_DIMENSIONS: u32 = 16;
+/// AccessLevel attribute
+const ATTRIBUTE_ACCESS_LEVEL: u32 = 17;
+/// UserAccessLevel attribute
+const ATTRIBUTE_USER_ACCESS_LEVEL: u32 = 18;
+/// MinimumSamplingInterval attribute
+const ATTRIBUTE_MINIMUM_SAMPLING_INTERVAL: u32 = 19;
+/// Historizing attribute
+const ATTRIBUTE_HISTORIZING: u32 = 20;
+/// Executable attribute
+const ATTRIBUTE_EXECUTABLE: u32 = 21;
+/// UserExecutable attribute
+const ATTRIBUTE_USER_EXECUTABLE: u32 = 22;
 
 // ============================================================================
 // OPC UA Browse Direction
