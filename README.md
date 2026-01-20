@@ -1,6 +1,62 @@
-# Suderra Edge Agent v1.2.4
+# Suderra Edge Agent v1.3.3
 
 Industrial IoT Edge Agent for aquaculture monitoring and control systems. Built with Rust for reliability, safety, and performance on resource-constrained edge devices.
+
+## What's New in v1.3.3 (Phase 22)
+
+### Workflow Bug Fixes
+Based on deep flow analysis of all `.rs` files, 9 critical workflow bugs fixed:
+
+| Bug | File | Issue | Fix |
+|-----|------|-------|-----|
+| **Circuit Breaker Infinite Loop** | `circuit_breaker.rs` | CAS loop had no total limit | Added `MAX_TOTAL_ITERATIONS=100` fail-safe |
+| **GPIO Command Loss** | `gpio.rs` | Command lost on final retry | Preserve command, log details |
+| **Program State Race** | `commands.rs` | Non-atomic script deploy + state save | Rollback on state save failure |
+| **MQTT Config Incomplete** | `main.rs` | Only username validated | Validate username, password, broker |
+| **Reboot Silent Failure** | `commands.rs` | No warning about failure non-reportability | Added explicit note in response |
+| **Activation Loop Backoff** | `main.rs` | No backoff on activation failure | Exponential backoff (5s, 10s, 20s) |
+| **Program State Corruption** | `commands.rs` | Corrupted file silently replaced | Backup corrupted file with timestamp |
+| **SQLite Poison Recovery** | `offline_queue.rs` | No connection health check after poison | Added `acquire_sqlite_lock()` with validation |
+| **Log Level Feedback** | `commands.rs` | Unclear change status | Added `previous_level`, `applied_immediately` fields |
+
+## What's New in v1.3.2
+
+### Security & Correctness
+- **OPC UA Response Parsing**: Fixed overly strict bounds check (12+ bytes, not 17+)
+- **Script Context Restoration**: Fixed context leak on early return in nested scripts
+- **CIP Tag Name Validation**: Added 255-byte limit check for EtherNet/IP tags
+
+## What's New in v1.3.0 (PLC Programming Edition)
+
+### PLC Programming Support
+Upload IEC 61131-3 programs to external PLCs via industrial protocols:
+
+| Protocol | PLCs | Port | Features |
+|----------|------|------|----------|
+| **Codesys V3** | WAGO, Festo, Schneider M241/M251 | 1217 | Upload, start/stop, status |
+| **S7comm** | Siemens S7-300/400/1200/1500 | 102 | Block upload, CPU control |
+| **OPC UA** | IEC 62541 compliant PLCs | 4840 | File transfer, IPv6 support |
+| **EtherNet/IP** | Allen-Bradley CompactLogix/ControlLogix | 44818 | Program upload |
+| **ADS/AMS** | Beckhoff TwinCAT 2/3 | 48898 | Boot project transfer |
+
+### New Commands
+- `plc_upload` - Upload ST/LD/FBD programs
+- `plc_status` - Get PLC connection status
+- `plc_start` / `plc_stop` - Control PLC execution
+- `plc_list` - List programs on PLC
+- `plc_download` - Download program from PLC
+- `plc_delete` - Delete program from PLC
+
+### Security Hardening (v1.3.1)
+Memory exhaustion protection added to all PLC protocols:
+
+| Protocol | Max Packet Size |
+|----------|-----------------|
+| S7comm | 64 KB |
+| OPC UA | 16 MB |
+| ADS/AMS | 1 MB |
+| Codesys | 64 KB |
+| EtherNet/IP | 64 KB |
 
 ## What's New in v1.2.4
 
