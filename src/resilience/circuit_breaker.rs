@@ -38,6 +38,11 @@ const DEFAULT_MAX_HALF_OPEN_PERMITS: u32 = 1;
 /// Prevents busy-wait under extreme contention
 const MAX_CAS_SPINS: u32 = 10;
 
+/// Maximum total loop iterations before giving up (v1.3.3)
+/// Prevents infinite loop under pathological contention scenarios
+/// If hit, circuit is treated as open (fail-safe behavior)
+const MAX_TOTAL_ITERATIONS: u32 = 100;
+
 /// Thread-safe circuit breaker using only atomic operations
 ///
 /// # Race Condition Prevention
@@ -122,8 +127,20 @@ impl CircuitBreaker {
     /// Call `release_permit()` after processing the request.
     pub fn is_open(&self) -> bool {
         let mut spin_count: u32 = 0;
+        let mut total_iterations: u32 = 0;
 
         loop {
+            // v1.3.3: Prevent infinite loop under pathological contention
+            total_iterations += 1;
+            if total_iterations > MAX_TOTAL_ITERATIONS {
+                tracing::warn!(
+                    "Circuit breaker '{}': exceeded max iterations ({}), treating as open (fail-safe)",
+                    self.name,
+                    MAX_TOTAL_ITERATIONS
+                );
+                return true; // Fail-safe: treat as open to prevent potential issues
+            }
+
             let current_state = self.state.load(Ordering::Acquire);
 
             match current_state {

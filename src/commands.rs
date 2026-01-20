@@ -503,9 +503,15 @@ impl CommandHandler {
                 }
             });
 
+            // v1.3.3: Add warning that reboot failures cannot be reported back
             (
                 true,
-                json!({"scheduled": true, "delay_seconds": delay_secs}),
+                json!({
+                    "scheduled": true,
+                    "delay_seconds": delay_secs,
+                    "note": "Reboot command accepted. If reboot fails (e.g., insufficient permissions), \
+                             failure will be logged locally but cannot be reported back to caller."
+                }),
                 None,
             )
         }
@@ -548,7 +554,16 @@ impl CommandHandler {
                 }
             });
 
-            (true, json!({"scheduled": true}), None)
+            // v1.3.3: Add warning that restart failures cannot be reported back
+            (
+                true,
+                json!({
+                    "scheduled": true,
+                    "note": "Restart command accepted. If restart fails, \
+                             failure will be logged locally but cannot be reported back to caller."
+                }),
+                None,
+            )
         }
 
         #[cfg(not(target_os = "linux"))]
@@ -590,14 +605,23 @@ impl CommandHandler {
 
         // Update config
         let mut state = self.state.write().await;
+        let previous_level = state.config.logging.level.clone();
         state.config.logging.level = level.to_lowercase();
 
         // Note: Actually changing the tracing level at runtime requires more setup
         // For now, we just update the config (effective after restart)
+        // v1.3.3: Provide clearer feedback about what changed and what's needed
 
         (
             true,
-            json!({"level": level, "note": "Effective after agent restart"}),
+            json!({
+                "previous_level": previous_level,
+                "requested_level": level.to_lowercase(),
+                "applied_immediately": false,
+                "note": "Log level configuration updated. Changes will take effect after agent restart. \
+                        Use 'restart_agent' command to apply immediately, or the agent will use the new \
+                        level on next startup."
+            }),
             None,
         )
     }
@@ -1224,6 +1248,7 @@ impl CommandHandler {
         }
 
         // Deploy script portion (v2.2 - uses shared storage, v1.2.0 - async API)
+        let script_id = program.script.id.clone();
         if let Err(e) = self.script_storage.add_script(program.script.clone()).await {
             error!("Failed to deploy script: {}", e);
             return (
@@ -1238,12 +1263,25 @@ impl CommandHandler {
         state.deployed_at = Some(Utc::now().to_rfc3339());
 
         // Persist to disk
+        // v1.3.3: If persistence fails, rollback the script deployment to maintain consistency
         if let Err(e) = self.save_program_state(&state) {
             error!("Failed to save program state: {}", e);
+
+            // Rollback: remove the script we just added
+            if let Err(rollback_err) = self.script_storage.delete(&script_id).await {
+                error!(
+                    "CRITICAL: Failed to rollback script deployment after state save failure: {}. \
+                    System may be in inconsistent state - manual intervention required.",
+                    rollback_err
+                );
+            } else {
+                warn!("Rolled back script deployment due to state save failure");
+            }
+
             return (
                 false,
                 json!(null),
-                Some(format!("Failed to persist program: {}", e)),
+                Some(format!("Failed to persist program (rolled back): {}", e)),
             );
         }
 
@@ -2060,6 +2098,7 @@ impl CommandHandler {
 
     /// Load program state from disk
     /// v1.2.6: Added error logging to prevent silent data loss
+    /// v1.3.3: Added backup of corrupted files for forensic analysis
     fn load_program_state(&self) -> ProgramState {
         match fs::read_to_string(&self.program_state_path) {
             Ok(content) => match serde_json::from_str(&content) {
@@ -2068,8 +2107,32 @@ impl CommandHandler {
                     error!(
                         path = ?self.program_state_path,
                         error = %e,
-                        "Failed to parse program state - using default (DATA LOSS WARNING)"
+                        "Failed to parse program state - file may be corrupted"
                     );
+
+                    // v1.3.3: Backup corrupted file for forensic analysis
+                    let backup_path = format!(
+                        "{}.corrupted.{}",
+                        self.program_state_path.display(),
+                        chrono::Utc::now().format("%Y%m%d_%H%M%S")
+                    );
+                    match fs::copy(&self.program_state_path, &backup_path) {
+                        Ok(_) => {
+                            warn!(
+                                "Corrupted program state backed up to: {}. \
+                                Using default state. Manual investigation recommended.",
+                                backup_path
+                            );
+                        }
+                        Err(backup_err) => {
+                            error!(
+                                "Failed to backup corrupted program state: {}. \
+                                Original file at: {:?}. DATA MAY BE LOST.",
+                                backup_err, self.program_state_path
+                            );
+                        }
+                    }
+
                     ProgramState::default()
                 }
             },

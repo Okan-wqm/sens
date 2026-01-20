@@ -643,49 +643,93 @@ async fn run_agent(
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> Result<()> {
     // Step 1: Check if already activated (MQTT credentials in config)
+    // v1.3.3: Validate ALL required MQTT fields, not just username
     let needs_activation = {
         let state_guard = state.read().await;
-        state_guard.config.mqtt.username.is_none()
+        let mqtt = &state_guard.config.mqtt;
+
+        // All required fields must be present for a valid activation
+        let missing_username = mqtt.username.is_none();
+        let missing_password = mqtt.password.is_none();
+        let missing_broker = mqtt.broker.is_none();
+
+        if !missing_username && (missing_password || missing_broker) {
+            // Partial configuration detected - this is an invalid state
+            warn!(
+                "MQTT config incomplete: username={}, password={}, broker={}. Treating as not activated.",
+                !missing_username,
+                !missing_password,
+                !missing_broker
+            );
+        }
+
+        missing_username || missing_password || missing_broker
     };
 
     if needs_activation {
         info!("Device not activated, starting provisioning...");
 
         // Step 2: Activate with cloud platform
+        // v1.3.3: Add exponential backoff for activation retries to prevent tight restart loops
+        const MAX_ACTIVATION_RETRIES: u32 = 3;
+        const INITIAL_BACKOFF_SECS: u64 = 5;
+
         let provisioning_client = ProvisioningClient::new(state.clone())
             .context("Failed to create provisioning client")?;
 
-        match provisioning_client.activate().await {
-            Ok(response) => {
-                info!("Device activated successfully!");
-                info!("  MQTT Broker: {}", response.mqtt_broker);
-                info!("  Tenant ID: {}", response.tenant_id);
+        let mut last_error = None;
+        for attempt in 0..MAX_ACTIVATION_RETRIES {
+            if attempt > 0 {
+                let backoff_secs = INITIAL_BACKOFF_SECS * (1 << (attempt - 1)); // 5, 10, 20 seconds
+                warn!(
+                    "Activation attempt {}/{} failed, retrying in {}s...",
+                    attempt, MAX_ACTIVATION_RETRIES, backoff_secs
+                );
+                tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
+            }
 
-                // Update state with activation response
-                let mut state_guard = state.write().await;
-                state_guard.config.mqtt.broker = Some(response.mqtt_broker);
-                state_guard.config.mqtt.port = response.mqtt_port;
-                state_guard.config.mqtt.username = Some(response.mqtt_username);
-                state_guard.config.mqtt.password =
-                    Some(secrecy::Secret::new(response.mqtt_password));
-                state_guard.tenant_id = Some(response.tenant_id.clone());
-                state_guard.is_activated = true;
+            match provisioning_client.activate().await {
+                Ok(response) => {
+                    info!("Device activated successfully!");
+                    info!("  MQTT Broker: {}", response.mqtt_broker);
+                    info!("  Tenant ID: {}", response.tenant_id);
 
-                // SECURITY: Clear provisioning token from memory after successful activation
-                // This prevents the token from being leaked in logs or memory dumps
-                state_guard.config.provisioning_token = None;
-                info!("Provisioning token cleared from memory");
+                    // Update state with activation response
+                    let mut state_guard = state.write().await;
+                    state_guard.config.mqtt.broker = Some(response.mqtt_broker);
+                    state_guard.config.mqtt.port = response.mqtt_port;
+                    state_guard.config.mqtt.username = Some(response.mqtt_username);
+                    state_guard.config.mqtt.password =
+                        Some(secrecy::Secret::new(response.mqtt_password));
+                    state_guard.tenant_id = Some(response.tenant_id.clone());
+                    state_guard.is_activated = true;
 
-                // Save updated config to disk (token will not be saved due to skip_serializing_if)
-                if let Err(e) = state_guard.config.save() {
-                    warn!("Failed to save config after activation: {}", e);
+                    // SECURITY: Clear provisioning token from memory after successful activation
+                    // This prevents the token from being leaked in logs or memory dumps
+                    state_guard.config.provisioning_token = None;
+                    info!("Provisioning token cleared from memory");
+
+                    // Save updated config to disk (token will not be saved due to skip_serializing_if)
+                    if let Err(e) = state_guard.config.save() {
+                        warn!("Failed to save config after activation: {}", e);
+                    }
+
+                    last_error = None;
+                    break;
+                }
+                Err(e) => {
+                    error!("Activation attempt {}/{} failed: {}", attempt + 1, MAX_ACTIVATION_RETRIES, e);
+                    last_error = Some(e);
                 }
             }
-            Err(e) => {
-                error!("Activation failed: {}", e);
-                error!("Will retry on next restart");
-                return Err(e);
-            }
+        }
+
+        if let Some(e) = last_error {
+            error!(
+                "Activation failed after {} attempts. Will retry on next restart.",
+                MAX_ACTIVATION_RETRIES
+            );
+            return Err(e);
         }
     } else {
         info!("Device already activated, using stored credentials");

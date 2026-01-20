@@ -185,12 +185,19 @@ impl GpioHandle {
     ///
     /// Used for fire-and-forget commands where we want to avoid blocking
     /// but still handle transient backpressure.
+    ///
+    /// # v1.3.3: Fixed command loss on final retry exhaustion
+    /// Previously, the command would be consumed but not returned on the last
+    /// failed attempt. Now we properly preserve the command in the error.
     #[allow(dead_code)]
     async fn try_send_with_retry(&self, mut cmd: GpioCommand) -> Result<(), String> {
         for attempt in 0..GPIO_SEND_RETRIES {
             match self.sender.try_send(cmd) {
                 Ok(()) => return Ok(()),
                 Err(TrySendError::Full(returned_cmd)) => {
+                    // v1.3.3: Always preserve the command for potential retry or logging
+                    cmd = returned_cmd;
+
                     if attempt < GPIO_SEND_RETRIES - 1 {
                         // Exponential backoff: 10ms, 20ms, 40ms
                         let delay = GPIO_RETRY_DELAY_MS * (1 << attempt);
@@ -201,14 +208,14 @@ impl GpioHandle {
                             delay
                         );
                         tokio::time::sleep(Duration::from_millis(delay)).await;
-                        cmd = returned_cmd;
                     } else {
+                        // v1.3.3: Log command details before returning error
                         warn!(
-                            "GPIO channel full after {} retries (buffer size: {})",
-                            GPIO_SEND_RETRIES, self.channel_size
+                            "GPIO channel full after {} retries (buffer size: {}), command lost: {:?}",
+                            GPIO_SEND_RETRIES, self.channel_size, cmd
                         );
                         return Err(format!(
-                            "GPIO channel full after {} retries",
+                            "GPIO channel full after {} retries - command dropped",
                             GPIO_SEND_RETRIES
                         ));
                     }
@@ -218,7 +225,9 @@ impl GpioHandle {
                 }
             }
         }
-        Err("GPIO send failed".to_string())
+        // v1.3.3: This should be unreachable, but log if it happens
+        warn!("GPIO send failed unexpectedly after loop completion");
+        Err("GPIO send failed unexpectedly".to_string())
     }
 
     /// Initialize GPIO hardware

@@ -32,6 +32,8 @@ use tracing::{debug, error, info, warn};
 /// will recover the lock and log a warning. The data may be in an
 /// inconsistent state, but for SQLite connections this is generally safe
 /// as SQLite handles its own transaction rollback.
+///
+/// # v1.3.3: Added connection health check after poison recovery
 fn acquire_lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>> {
     match mutex.lock() {
         Ok(guard) => Ok(guard),
@@ -44,6 +46,54 @@ fn acquire_lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>> {
             Ok(poisoned.into_inner())
         }
     }
+}
+
+/// Acquire SQLite connection lock with poison recovery and health check (v1.3.3)
+///
+/// After recovering from a poisoned mutex, validates that the SQLite connection
+/// is still usable by executing a simple query. If the connection is corrupted,
+/// returns an error instead of silently proceeding with a bad connection.
+fn acquire_sqlite_lock(mutex: &Mutex<Connection>) -> Result<MutexGuard<'_, Connection>> {
+    let was_poisoned;
+    let guard = match mutex.lock() {
+        Ok(guard) => {
+            was_poisoned = false;
+            guard
+        }
+        Err(poisoned) => {
+            error!(
+                "SQLite mutex was poisoned by a panicked thread. Recovering lock and validating connection..."
+            );
+            was_poisoned = true;
+            poisoned.into_inner()
+        }
+    };
+
+    // If mutex was poisoned, validate SQLite connection health
+    if was_poisoned {
+        // Execute a simple query to verify the connection is still usable
+        match guard.execute("SELECT 1", []) {
+            Ok(_) => {
+                warn!(
+                    "SQLite connection validated after poison recovery. \
+                    Any incomplete transaction was rolled back by SQLite."
+                );
+            }
+            Err(e) => {
+                error!(
+                    "SQLite connection corrupted after poison recovery: {}. \
+                    Manual intervention required - consider restarting the agent.",
+                    e
+                );
+                return Err(anyhow::anyhow!(
+                    "SQLite connection corrupted after mutex poison recovery: {}",
+                    e
+                ));
+            }
+        }
+    }
+
+    Ok(guard)
 }
 
 /// Message priority levels (higher value = higher priority)
