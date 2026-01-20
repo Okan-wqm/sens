@@ -27,9 +27,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
+use tokio::time::timeout;
 use tracing::{debug, info, warn};
 
 // ============================================================================
@@ -288,21 +290,47 @@ impl CodesysClient {
         Ok((code, payload))
     }
 
-    /// Send packet and receive response
+    /// Send packet and receive response with timeout protection
     async fn send_receive(&self, service_id: ServiceId, payload: &[u8]) -> Result<Vec<u8>> {
+        let io_timeout = Duration::from_secs(self.config.timeout_secs);
         let mut conn_guard = self.connection.lock().await;
         let conn = conn_guard
             .as_mut()
             .ok_or_else(|| anyhow!("Not connected"))?;
 
-        let packet = self.build_packet(service_id, payload);
+        // Build packet with session_id if available (for authenticated requests)
+        let mut full_payload = Vec::new();
+        if let Some(session_id) = *self.session_id.lock().await {
+            // Prepend session_id to payload for authenticated requests
+            // (Login and Logout don't need this, but other requests do)
+            if service_id != ServiceId::Login {
+                full_payload.extend_from_slice(&session_id.to_le_bytes());
+            }
+        }
+        full_payload.extend_from_slice(payload);
 
-        // Send
-        conn.write_all(&packet).await?;
+        let packet = self.build_packet(service_id, &full_payload);
 
-        // Receive response header (16 bytes: magic + length + service_id + reserved + payload_len)
+        // Send with timeout
+        timeout(io_timeout, conn.write_all(&packet))
+            .await
+            .map_err(|_| {
+                anyhow!(
+                    "Codesys write timeout after {} seconds",
+                    self.config.timeout_secs
+                )
+            })??;
+
+        // Receive response header with timeout (16 bytes: magic + length + service_id + reserved + payload_len)
         let mut header = [0u8; 16];
-        conn.read_exact(&mut header).await?;
+        timeout(io_timeout, conn.read_exact(&mut header))
+            .await
+            .map_err(|_| {
+                anyhow!(
+                    "Codesys read timeout after {} seconds",
+                    self.config.timeout_secs
+                )
+            })??;
 
         // Parse header to get payload length (bytes 12-15)
         let payload_len =
@@ -317,10 +345,17 @@ impl CodesysClient {
             ));
         }
 
-        // Read payload
+        // Read payload with timeout
         let mut response_payload = vec![0u8; payload_len];
         if payload_len > 0 {
-            conn.read_exact(&mut response_payload).await?;
+            timeout(io_timeout, conn.read_exact(&mut response_payload))
+                .await
+                .map_err(|_| {
+                    anyhow!(
+                        "Codesys payload read timeout after {} seconds",
+                        self.config.timeout_secs
+                    )
+                })??;
         }
 
         // Combine header and payload for parsing
@@ -442,6 +477,25 @@ impl PlcProgrammer for CodesysClient {
         let addr = format!("{}:{}", self.config.address, self.config.port);
         info!("Connecting to Codesys PLC at {}", addr);
 
+        // Warn about unimplemented features
+        if self.config.encrypted {
+            warn!(
+                "SECURITY: Encryption requested but not yet implemented for Codesys PLC '{}'. \
+                 Connection will be unencrypted. Use VPN/network segmentation for security.",
+                self.config.name
+            );
+        }
+
+        if self.config.mode == CodesysConnectionMode::Gateway {
+            if let Some(ref device) = self.config.device_name {
+                warn!(
+                    "Gateway device selection ('{}') is not yet implemented - \
+                     connecting directly to gateway address",
+                    device
+                );
+            }
+        }
+
         let timeout_duration = std::time::Duration::from_secs(self.config.timeout_secs);
 
         let stream = with_timeout(
@@ -471,14 +525,20 @@ impl PlcProgrammer for CodesysClient {
     }
 
     async fn disconnect(&mut self) -> Result<()> {
+        // Send logout if we have a session
         if let Some(session_id) = *self.session_id.lock().await {
-            // Send logout
             let _ = self
                 .send_receive(ServiceId::Logout, &session_id.to_le_bytes())
                 .await;
         }
 
-        *self.connection.lock().await = None;
+        // Graceful TCP shutdown
+        if let Some(mut conn) = self.connection.lock().await.take() {
+            if let Err(e) = conn.shutdown().await {
+                debug!("Codesys disconnect shutdown notice: {}", e);
+            }
+        }
+
         *self.session_id.lock().await = None;
         self.connected.store(false, Ordering::Release);
 
