@@ -1197,11 +1197,17 @@ impl ModbusManager {
     ///
     /// Prefer `get_client_by_name` (async) for reliable lookups.
     /// This sync version uses try_lock and may return None if locks are contested.
-    ///
     /// v1.2.3: Added retry logic for contested locks
+    ///
+    /// DEPRECATED: Use `get_client_by_name()` instead - this sync version
+    /// uses busy-waiting which wastes CPU cycles. The async version properly
+    /// yields to the scheduler.
     #[allow(dead_code)]
+    #[deprecated(since = "1.3.2", note = "Use get_client_by_name() async version instead")]
     pub fn get_client(&self, name: &str) -> Option<Arc<Mutex<ModbusClient>>> {
         // v1.2.3: Retry multiple times if locks are contested
+        // v1.3.2: Note - spin_loop() doesn't actually yield to async runtime
+        // Use get_client_by_name() for proper async yielding
         for _attempt in 0..3 {
             for client_arc in &self.clients {
                 if let Ok(client) = client_arc.try_lock() {
@@ -1210,7 +1216,8 @@ impl ModbusManager {
                     }
                 }
             }
-            // Brief yield to allow other tasks to release locks
+            // Note: spin_loop() is just a CPU hint, doesn't yield to async runtime
+            // This is kept for backwards compatibility but should not be used
             std::hint::spin_loop();
         }
         None

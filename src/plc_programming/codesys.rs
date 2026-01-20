@@ -329,11 +329,16 @@ impl CodesysClient {
         let mut payload = Vec::new();
 
         // Username (null-terminated, padded to 32 bytes)
-        // Security: Require explicit credentials - no hardcoded defaults (IEC 62443)
+        // v1.3.2: Security note - IEC 62443 recommends explicit credentials
+        // Anonymous login is allowed for isolated networks but logged as security warning
         let username = match &self.config.username {
             Some(u) => u.as_str(),
             None => {
-                warn!("No username configured for Codesys PLC - using anonymous login");
+                warn!(
+                    "SECURITY: No username configured for Codesys PLC '{}' - using anonymous login. \
+                     Configure credentials for IEC 62443 compliance.",
+                    self.config.name
+                );
                 ""
             }
         };
@@ -436,8 +441,17 @@ impl PlcProgrammer for CodesysClient {
         *self.connection.lock().await = Some(stream);
         self.connected.store(true, Ordering::Release);
 
-        // Login
-        self.login().await?;
+        // v1.3.2: Login with rollback on failure to prevent connection leak
+        if let Err(e) = self.login().await {
+            // Rollback connection state on login failure
+            warn!(
+                "Login failed for Codesys PLC '{}', rolling back connection: {}",
+                self.config.name, e
+            );
+            *self.connection.lock().await = None;
+            self.connected.store(false, Ordering::Release);
+            return Err(e);
+        }
 
         info!("Connected to Codesys PLC: {}", self.config.name);
         Ok(())
