@@ -1,6 +1,6 @@
 # Suderra Edge Agent - Web API Reference
 
-**Version**: 1.3.3 (PLC Programming Edition)
+**Version**: 1.3.4 (High Availability Edition)
 **Platform**: Raspberry Pi / Revolution Pi / Generic Linux
 **Protocol**: MQTT 3.1.1 + HTTP Health API
 
@@ -19,14 +19,15 @@
 9. [Backup & Restore](#9-backup--restore)
 10. [Offline Queue](#10-offline-queue)
 11. [Resilience Patterns](#11-resilience-patterns)
-12. [HTTP Health API](#12-http-health-api)
-13. [Security](#13-security)
-14. [Configuration](#14-configuration)
-15. [Environment Variables](#15-environment-variables)
-16. [Feature Flags](#16-feature-flags)
-17. [Error Types](#17-error-types)
-18. [Provisioning](#18-provisioning)
-19. [Limits & Defaults](#19-limits--defaults)
+12. [MQTT Broker Failover (v1.3.4)](#12-mqtt-broker-failover-v134)
+13. [HTTP Health API](#13-http-health-api)
+14. [Security](#14-security)
+15. [Configuration](#15-configuration)
+16. [Environment Variables](#16-environment-variables)
+17. [Feature Flags](#17-feature-flags)
+18. [Error Types](#18-error-types)
+19. [Provisioning](#19-provisioning)
+20. [Limits & Defaults](#20-limits--defaults)
 
 ---
 
@@ -1915,7 +1916,185 @@ CLOSED ─(N failures)─→ OPEN
 
 ---
 
-## 12. HTTP Health API
+## 12. MQTT Broker Failover (v1.3.4)
+
+High availability support through automatic failover to backup MQTT broker.
+
+### 12.1 Configuration
+
+```yaml
+mqtt:
+  broker: "mqtt-primary.example.com"
+  port: 8883
+  failover:
+    enabled: true
+    backup_broker: "mqtt-backup.example.com"
+    backup_port: 8883              # Optional, defaults to primary port
+    timeout_secs: 10               # Time before failover triggers
+    health_check_interval_secs: 60 # How often to check if primary is back
+    max_failures: 3                # Consecutive failures before failover
+    recovery_delay_secs: 5         # Delay before switching back to primary
+```
+
+### 12.2 Failover States
+
+| State | Description |
+|-------|-------------|
+| `PRIMARY_ACTIVE` | Connected to primary broker (normal operation) |
+| `CONNECTING_TO_BACKUP` | Primary failed, connecting to backup |
+| `BACKUP_ACTIVE` | Connected to backup broker |
+| `CHECKING_PRIMARY` | On backup, checking if primary is back |
+| `SWITCHING_TO_PRIMARY` | Transitioning from backup to primary |
+| `DISCONNECTED` | Both brokers unavailable |
+
+### 12.3 State Machine
+
+```
+┌──────────────┐  connect fail   ┌───────────────┐
+│   PRIMARY    │ ───────────────▶│  CONNECTING   │
+│   ACTIVE     │                 │  TO BACKUP    │
+└──────▲───────┘                 └───────┬───────┘
+       │                                 │
+       │ primary                         │ backup
+       │ recovered                       │ connected
+       │                                 ▼
+┌──────┴───────┐  health check   ┌───────────────┐
+│   CHECKING   │ ◀───────────────│    BACKUP     │
+│   PRIMARY    │   (periodic)    │    ACTIVE     │
+└──────────────┘                 └───────────────┘
+```
+
+### 12.4 Failover Commands
+
+#### `failover_status`
+
+Get current failover state and configuration.
+
+**Request:**
+```json
+{
+  "command_id": "cmd_123",
+  "command": "failover_status",
+  "params": {},
+  "timestamp": "2026-01-20T12:00:00Z"
+}
+```
+
+**Response (failover enabled):**
+```json
+{
+  "command_id": "cmd_123",
+  "device_id": "device-abc",
+  "success": true,
+  "result": {
+    "enabled": true,
+    "primary_broker": "mqtt-primary.example.com:8883",
+    "backup_broker": "mqtt-backup.example.com:8883",
+    "config": {
+      "timeout_secs": 10,
+      "health_check_interval_secs": 60,
+      "max_failures": 3,
+      "recovery_delay_secs": 5
+    }
+  },
+  "timestamp": "2026-01-20T12:00:01Z"
+}
+```
+
+**Response (failover disabled):**
+```json
+{
+  "command_id": "cmd_123",
+  "device_id": "device-abc",
+  "success": true,
+  "result": {
+    "enabled": false,
+    "message": "Failover is not enabled. Configure mqtt.failover in config.yaml"
+  },
+  "timestamp": "2026-01-20T12:00:01Z"
+}
+```
+
+#### `failover_force`
+
+Manually trigger failover to backup broker.
+
+**Request:**
+```json
+{
+  "command_id": "cmd_124",
+  "command": "failover_force",
+  "params": {},
+  "timestamp": "2026-01-20T12:00:00Z"
+}
+```
+
+**Response:**
+```json
+{
+  "command_id": "cmd_124",
+  "device_id": "device-abc",
+  "success": true,
+  "result": {
+    "action": "failover_initiated",
+    "target": "mqtt-backup.example.com",
+    "message": "Failover to backup broker has been initiated"
+  },
+  "timestamp": "2026-01-20T12:00:01Z"
+}
+```
+
+#### `failover_recover`
+
+Manually trigger recovery to primary broker.
+
+**Request:**
+```json
+{
+  "command_id": "cmd_125",
+  "command": "failover_recover",
+  "params": {},
+  "timestamp": "2026-01-20T12:00:00Z"
+}
+```
+
+**Response:**
+```json
+{
+  "command_id": "cmd_125",
+  "device_id": "device-abc",
+  "success": true,
+  "result": {
+    "action": "recovery_initiated",
+    "target": "mqtt-primary.example.com",
+    "message": "Recovery to primary broker has been initiated"
+  },
+  "timestamp": "2026-01-20T12:00:01Z"
+}
+```
+
+### 12.5 Default Values
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `enabled` | `false` | Failover disabled by default |
+| `backup_port` | Same as primary | Backup broker port |
+| `timeout_secs` | `10` | Seconds before triggering failover |
+| `health_check_interval_secs` | `60` | How often to check primary |
+| `max_failures` | `3` | Failures before failover |
+| `recovery_delay_secs` | `5` | Delay before switching back |
+
+### 12.6 Offline Queue Integration
+
+When both brokers are unavailable:
+- Messages are stored in SQLite-backed offline queue
+- Queue is flushed when any broker becomes available
+- Priority ordering preserved (QoS 1 > QoS 0)
+- No message loss guaranteed
+
+---
+
+## 13. HTTP Health API
 
 **Build:** `cargo build --features health`
 **Port:** 8080 (configurable)

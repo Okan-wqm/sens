@@ -12,16 +12,23 @@
 //! - Increased message channel capacity (100 -> 500)
 //! - Added backpressure handling with retry logic
 //! - Improved error reporting for channel full conditions
+//!
+//! ## v1.3.4 Failover Support
+//! - Automatic failover to backup broker on primary failure
+//! - Health checks for primary broker recovery
+//! - Zero message loss with offline queue integration
 
 use anyhow::{Context, Result};
 use chrono::Utc;
 use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS, Transport};
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
-// Removed unused: AtomicU64, Ordering (v1.2.3 cleanup)
+use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch, RwLock};
 use tracing::{debug, error, info, trace, warn};
+
+use crate::mqtt_failover::{BrokerEndpoint, FailoverManager, FailoverState};
 
 /// Message channel capacity (v1.2.3: increased from 100 to 500)
 /// Higher capacity reduces message loss during burst traffic
@@ -581,5 +588,328 @@ impl MqttClient {
         };
 
         Ok(Transport::Tls(tls))
+    }
+
+    /// Create MQTT options for a specific broker endpoint
+    pub fn create_mqtt_options(
+        config: &crate::config::AgentConfig,
+        broker: &BrokerEndpoint,
+    ) -> Result<MqttOptions> {
+        let username = config
+            .mqtt
+            .username
+            .as_ref()
+            .ok_or_else(|| crate::error::AgentError::Mqtt("MQTT username not configured".into()))?;
+        let password = config
+            .mqtt
+            .password
+            .as_ref()
+            .ok_or_else(|| crate::error::AgentError::Mqtt("MQTT password not configured".into()))?;
+
+        let mut options = MqttOptions::new(username, &broker.host, broker.port);
+        options.set_credentials(username, password.expose_secret());
+        options.set_keep_alive(Duration::from_secs(config.mqtt.keepalive_secs));
+        options.set_clean_session(config.mqtt.clean_session);
+
+        Ok(options)
+    }
+}
+
+// ============================================================================
+// Failover MQTT Client (v1.3.4)
+// ============================================================================
+
+/// MQTT client with automatic failover support
+///
+/// Wraps the standard MqttClient and adds:
+/// - Automatic failover to backup broker on failure
+/// - Health checks for primary broker recovery
+/// - Seamless reconnection handling
+pub struct FailoverMqttClient {
+    /// Inner MQTT client (current active connection)
+    inner: Arc<RwLock<Option<MqttClient>>>,
+    /// Failover manager
+    failover_manager: Arc<FailoverManager>,
+    /// State change receiver
+    state_rx: watch::Receiver<FailoverState>,
+    /// Configuration reference
+    config: Arc<crate::config::AgentConfig>,
+    /// Health check task handle
+    health_check_handle: Option<tokio::task::JoinHandle<()>>,
+    /// Reconnection task handle
+    reconnect_handle: Option<tokio::task::JoinHandle<()>>,
+    /// Message receiver (proxied from inner client)
+    message_rx: mpsc::Receiver<IncomingMessage>,
+    /// Message sender for proxying
+    message_tx: mpsc::Sender<IncomingMessage>,
+}
+
+impl FailoverMqttClient {
+    /// Create a new failover-enabled MQTT client
+    pub async fn new(config: Arc<crate::config::AgentConfig>) -> Result<Self> {
+        let primary_broker = config
+            .mqtt
+            .broker
+            .as_ref()
+            .ok_or_else(|| crate::error::AgentError::Mqtt("MQTT broker not configured".into()))?
+            .clone();
+
+        // Create failover manager
+        let (failover_manager, state_rx) = FailoverManager::new(
+            primary_broker,
+            config.mqtt.port,
+            config.mqtt.failover.clone(),
+        );
+        let failover_manager = Arc::new(failover_manager);
+
+        // Create message channel for proxying
+        let (message_tx, message_rx) = mpsc::channel(MESSAGE_CHANNEL_CAPACITY);
+
+        // Create initial MQTT client connected to primary
+        let inner_client = MqttClient::new(&config).await?;
+
+        let mut client = Self {
+            inner: Arc::new(RwLock::new(Some(inner_client))),
+            failover_manager: failover_manager.clone(),
+            state_rx,
+            config,
+            health_check_handle: None,
+            reconnect_handle: None,
+            message_rx,
+            message_tx,
+        };
+
+        // Start health check task if failover is enabled
+        if failover_manager.is_enabled() {
+            let handle = failover_manager.start_health_check_task();
+            client.health_check_handle = Some(handle);
+            info!(
+                "🔄 Failover enabled: primary={}, backup={}",
+                failover_manager.get_primary().address(),
+                failover_manager
+                    .get_backup()
+                    .map(|b| b.address())
+                    .unwrap_or_else(|| "none".to_string())
+            );
+        }
+
+        // Start message proxy task
+        client.start_message_proxy();
+
+        Ok(client)
+    }
+
+    /// Start message proxy task that forwards messages from inner client
+    fn start_message_proxy(&self) {
+        let inner = self.inner.clone();
+        let message_tx = self.message_tx.clone();
+
+        tokio::spawn(async move {
+            loop {
+                // Try to receive from inner client
+                let msg = {
+                    let mut guard = inner.write().await;
+                    if let Some(ref mut client) = *guard {
+                        client.try_recv()
+                    } else {
+                        None
+                    }
+                };
+
+                if let Some(msg) = msg {
+                    if message_tx.send(msg).await.is_err() {
+                        break; // Receiver dropped
+                    }
+                } else {
+                    // No message available, wait a bit
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            }
+        });
+    }
+
+    /// Get the failover manager for status/control
+    pub fn failover_manager(&self) -> &Arc<FailoverManager> {
+        &self.failover_manager
+    }
+
+    /// Get current failover state
+    pub async fn get_failover_state(&self) -> FailoverState {
+        self.failover_manager.get_state().await
+    }
+
+    /// Check if currently connected to backup broker
+    pub async fn is_on_backup(&self) -> bool {
+        matches!(
+            self.failover_manager.get_state().await,
+            FailoverState::BackupActive
+        )
+    }
+
+    /// Publish device status
+    pub async fn publish_status(&self, status: DeviceStatus, uptime_seconds: u64) -> Result<()> {
+        let guard = self.inner.read().await;
+        if let Some(ref client) = *guard {
+            client.publish_status(status, uptime_seconds).await
+        } else {
+            Err(anyhow::anyhow!("MQTT client not connected"))
+        }
+    }
+
+    /// Publish telemetry data
+    pub async fn publish_telemetry(&self, metrics: TelemetryMetrics) -> Result<()> {
+        let guard = self.inner.read().await;
+        if let Some(ref client) = *guard {
+            client.publish_telemetry(metrics).await
+        } else {
+            Err(anyhow::anyhow!("MQTT client not connected"))
+        }
+    }
+
+    /// Publish command response
+    pub async fn publish_response(&self, response: CommandResponse) -> Result<()> {
+        let guard = self.inner.read().await;
+        if let Some(ref client) = *guard {
+            client.publish_response(response).await
+        } else {
+            Err(anyhow::anyhow!("MQTT client not connected"))
+        }
+    }
+
+    /// Receive next incoming message
+    pub async fn recv(&mut self) -> Option<IncomingMessage> {
+        self.message_rx.recv().await
+    }
+
+    /// Try to receive incoming message without blocking
+    pub fn try_recv(&mut self) -> Option<IncomingMessage> {
+        self.message_rx.try_recv().ok()
+    }
+
+    /// Get topics reference
+    pub async fn topics(&self) -> Option<ResolvedTopics> {
+        let guard = self.inner.read().await;
+        guard.as_ref().map(|c| c.topics().clone())
+    }
+
+    /// Handle connection failure - may trigger failover
+    pub async fn handle_connection_failure(&self) -> bool {
+        let should_failover = self.failover_manager.record_failure().await;
+
+        if should_failover {
+            info!("🔄 Initiating failover to backup broker...");
+            if let Err(e) = self.reconnect_to_backup().await {
+                error!("Failed to connect to backup broker: {}", e);
+                return false;
+            }
+            return true;
+        }
+
+        false
+    }
+
+    /// Handle successful connection
+    pub async fn handle_connection_success(&self) {
+        self.failover_manager.record_success().await;
+    }
+
+    /// Reconnect to backup broker
+    async fn reconnect_to_backup(&self) -> Result<()> {
+        let backup = self
+            .failover_manager
+            .get_backup()
+            .ok_or_else(|| anyhow::anyhow!("No backup broker configured"))?;
+
+        info!(
+            "🔄 Connecting to backup broker: {}:{}",
+            backup.host, backup.port
+        );
+
+        // Create new config with backup broker
+        let mut backup_config = (*self.config).clone();
+        backup_config.mqtt.broker = Some(backup.host.clone());
+        backup_config.mqtt.port = backup.port;
+
+        // Disconnect old client
+        {
+            let mut guard = self.inner.write().await;
+            if let Some(client) = guard.take() {
+                let _ = client.disconnect().await;
+            }
+        }
+
+        // Connect to backup
+        let new_client = MqttClient::new(&backup_config).await?;
+
+        {
+            let mut guard = self.inner.write().await;
+            *guard = Some(new_client);
+        }
+
+        self.failover_manager.record_success().await;
+        info!("✅ Connected to backup broker");
+
+        Ok(())
+    }
+
+    /// Reconnect to primary broker (called during recovery)
+    pub async fn reconnect_to_primary(&self) -> Result<()> {
+        let primary = self.failover_manager.get_primary();
+
+        info!(
+            "🔄 Reconnecting to primary broker: {}:{}",
+            primary.host, primary.port
+        );
+
+        // Disconnect old client
+        {
+            let mut guard = self.inner.write().await;
+            if let Some(client) = guard.take() {
+                let _ = client.disconnect().await;
+            }
+        }
+
+        // Connect to primary
+        let new_client = MqttClient::new(&self.config).await?;
+
+        {
+            let mut guard = self.inner.write().await;
+            *guard = Some(new_client);
+        }
+
+        self.failover_manager.record_success().await;
+        info!("✅ Reconnected to primary broker");
+
+        Ok(())
+    }
+
+    /// Disconnect and cleanup
+    pub async fn disconnect(mut self) -> Result<()> {
+        // Shutdown failover manager
+        self.failover_manager.shutdown();
+
+        // Cancel health check task
+        if let Some(handle) = self.health_check_handle.take() {
+            handle.abort();
+        }
+
+        // Cancel reconnect task
+        if let Some(handle) = self.reconnect_handle.take() {
+            handle.abort();
+        }
+
+        // Disconnect inner client
+        let mut guard = self.inner.write().await;
+        if let Some(client) = guard.take() {
+            client.disconnect().await?;
+        }
+
+        info!("Failover MQTT client disconnected");
+        Ok(())
+    }
+
+    /// Get failover status report (JSON)
+    pub async fn get_failover_status(&self) -> serde_json::Value {
+        self.failover_manager.get_status_report().await
     }
 }

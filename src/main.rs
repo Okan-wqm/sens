@@ -22,6 +22,7 @@ mod i2c; // v1.2.4: I2C support for sensor communication
 mod interning;
 mod modbus;
 mod mqtt;
+mod mqtt_failover; // v1.3.4: MQTT broker failover for high availability
 mod offline_queue;
 mod plc_programming; // v1.3.0: PLC programming protocols (ST upload)
 mod provisioning;

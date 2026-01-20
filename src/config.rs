@@ -215,7 +215,7 @@ pub struct MqttTlsConfig {
 /// MQTT configuration
 #[derive(Clone, Serialize, Deserialize)]
 pub struct MqttConfig {
-    /// MQTT broker hostname
+    /// MQTT broker hostname (primary)
     pub broker: Option<String>,
 
     /// MQTT broker port (1883 for plain, 8883 for TLS)
@@ -253,6 +253,60 @@ pub struct MqttConfig {
     /// Last Will topic for device status (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_will_topic: Option<String>,
+
+    /// Failover configuration for high availability (v1.3.4)
+    #[serde(default)]
+    pub failover: MqttFailoverConfig,
+}
+
+/// MQTT Failover configuration for high availability (v1.3.4)
+///
+/// Enables automatic failover to a backup broker when the primary
+/// broker becomes unavailable. Supports health checks and automatic
+/// recovery to primary when it comes back online.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MqttFailoverConfig {
+    /// Enable failover functionality
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Backup broker hostname
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backup_broker: Option<String>,
+
+    /// Backup broker port (defaults to same as primary)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backup_port: Option<u16>,
+
+    /// Connection timeout before failover (seconds)
+    #[serde(default = "default_failover_timeout_secs")]
+    pub timeout_secs: u64,
+
+    /// Interval to check if primary is back online (seconds)
+    #[serde(default = "default_failover_health_check_secs")]
+    pub health_check_interval_secs: u64,
+
+    /// Maximum consecutive failures before failover
+    #[serde(default = "default_failover_max_failures")]
+    pub max_failures: u32,
+
+    /// Delay before attempting to reconnect to primary (seconds)
+    #[serde(default = "default_failover_recovery_delay_secs")]
+    pub recovery_delay_secs: u64,
+}
+
+impl Default for MqttFailoverConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            backup_broker: None,
+            backup_port: None,
+            timeout_secs: default_failover_timeout_secs(),
+            health_check_interval_secs: default_failover_health_check_secs(),
+            max_failures: default_failover_max_failures(),
+            recovery_delay_secs: default_failover_recovery_delay_secs(),
+        }
+    }
 }
 
 /// Custom Debug implementation that masks the password
@@ -268,6 +322,7 @@ impl fmt::Debug for MqttConfig {
             .field("keepalive_secs", &self.keepalive_secs)
             .field("clean_session", &self.clean_session)
             .field("last_will_topic", &self.last_will_topic)
+            .field("failover", &self.failover)
             .finish()
     }
 }
@@ -962,6 +1017,20 @@ fn default_mqtt_reconnect_min_secs() -> u64 {
 }
 fn default_mqtt_reconnect_max_secs() -> u64 {
     60
+}
+
+// Failover defaults (v1.3.4)
+fn default_failover_timeout_secs() -> u64 {
+    10 // 10 seconds before failover
+}
+fn default_failover_health_check_secs() -> u64 {
+    60 // Check primary every 60 seconds when on backup
+}
+fn default_failover_max_failures() -> u32 {
+    3 // 3 consecutive failures trigger failover
+}
+fn default_failover_recovery_delay_secs() -> u64 {
+    5 // Wait 5 seconds before switching back to primary
 }
 
 // Default topic patterns (v1.1 spec)

@@ -1,6 +1,55 @@
-# Suderra Edge Agent v1.3.3
+# Suderra Edge Agent v1.3.4
 
 Industrial IoT Edge Agent for aquaculture monitoring and control systems. Built with Rust for reliability, safety, and performance on resource-constrained edge devices.
+
+## What's New in v1.3.4 (High Availability Edition)
+
+### MQTT Broker Failover
+Automatic failover to backup MQTT broker for high availability:
+
+```yaml
+mqtt:
+  broker: "mqtt-primary.example.com"
+  port: 8883
+  failover:
+    enabled: true
+    backup_broker: "mqtt-backup.example.com"
+    backup_port: 8883              # Optional, defaults to primary port
+    timeout_secs: 10               # Time before failover triggers
+    health_check_interval_secs: 60 # How often to check if primary is back
+    max_failures: 3                # Consecutive failures before failover
+    recovery_delay_secs: 5         # Delay before switching back to primary
+```
+
+**Features:**
+- Automatic failover when primary broker becomes unreachable
+- Health checks to detect primary broker recovery
+- Graceful switchback to primary when available
+- Zero message loss with offline queue integration
+- Full statistics tracking (failover count, recovery count, backup time)
+
+**State Machine:**
+```
+┌──────────────┐  connect fail   ┌───────────────┐
+│   PRIMARY    │ ───────────────▶│  CONNECTING   │
+│   ACTIVE     │                 │  TO BACKUP    │
+└──────▲───────┘                 └───────┬───────┘
+       │                                 │
+       │ primary                         │ backup
+       │ recovered                       │ connected
+       │                                 ▼
+┌──────┴───────┐  health check   ┌───────────────┐
+│   CHECKING   │ ◀───────────────│    BACKUP     │
+│   PRIMARY    │   (periodic)    │    ACTIVE     │
+└──────────────┘                 └───────────────┘
+```
+
+**New Commands:**
+- `failover_status` - Get current failover state and configuration
+- `failover_force` - Manually trigger failover to backup
+- `failover_recover` - Manually trigger recovery to primary
+
+---
 
 ## What's New in v1.3.3 (Phase 22)
 
